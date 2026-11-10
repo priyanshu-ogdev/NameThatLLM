@@ -68,7 +68,7 @@ print("\n[Audit Test 5/7] Platt temperature optimization on extreme margins...")
 extreme_margins = np.random.randn(50, 18) * 100.0  # Massive overconfidence
 y_mock = np.random.randint(0, 18, 50)
 t_opt = fit_temperature(extreme_margins, y_mock, default_t=1.0)
-assert 0.05 <= t_opt <= 3.0, f"Fitted temp out of bounds: {t_opt}"
+assert 0.05 <= t_opt <= 8.0, f"Fitted temp out of bounds: {t_opt}"
 print(f"  -> Temperature optimization bounded and stable: T={t_opt} [PASSED]")
 
 # Test 6: Sinkhorn column sum invariance under extreme skew

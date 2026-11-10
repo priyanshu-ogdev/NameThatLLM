@@ -734,11 +734,13 @@ class FastBatchPrefetcher:
                 gpu_kw = {k: v.to(self.dev, non_blocking=True) for k, v in kw.items()}
                 gpu_labels = labels.to(self.label_dev, non_blocking=True)
                 self.current_groups = groups.to(self.label_dev, non_blocking=True) if groups is not None else None
+                gpu_kw["_batch_groups"] = self.current_groups
                 yield gpu_kw, gpu_labels
             else:
                 cpu_kw = {k: v.to(self.dev) for k, v in kw.items()}
                 cpu_labels = labels.to(self.label_dev)
                 self.current_groups = groups.to(self.label_dev) if groups is not None else None
+                cpu_kw["_batch_groups"] = self.current_groups
                 yield cpu_kw, cpu_labels
 
     def close(self):
@@ -790,13 +792,15 @@ def precompute_token_caches(raw_texts_tr, raw_texts_te, deberta_dir=None, bge_di
 
         enc_tr = tokenize_with_head_tail(tokenizer, raw_texts_tr, max_length=max_length, preserve_newlines=preserve_newlines)
         enc_te = tokenize_with_head_tail(tokenizer, raw_texts_te, max_length=max_length, preserve_newlines=preserve_newlines)
+        enc_te_tta = tokenize_with_head_tail(tokenizer, raw_texts_te, max_length=max_length, head_tokens=128, tail_tokens=320, preserve_newlines=preserve_newlines)
         enc_ext = tokenize_with_head_tail(tokenizer, raw_texts_ext, max_length=max_length, preserve_newlines=preserve_newlines) if raw_texts_ext else None
         dur = time.perf_counter() - t0
         n_ext_str = f" + {len(raw_texts_ext)} ext" if raw_texts_ext else ""
-        print(f"  [{model_tag.upper()} Cache] Pre-tokenized {len(raw_texts_tr)} train + {len(raw_texts_te)} test{n_ext_str} texts in {dur:.2f}s (RAM resident).", flush=True)
+        print(f"  [{model_tag.upper()} Cache] Pre-tokenized {len(raw_texts_tr)} train + {len(raw_texts_te)} test (with TTA){n_ext_str} texts in {dur:.2f}s (RAM resident).", flush=True)
         return {
             "tr": enc_tr,
             "te": enc_te,
+            "te_tta": enc_te_tta,
             "ext": enc_ext,
             "tokenizer": tokenizer,
             "staged_dir": staged_dir,
@@ -1093,8 +1097,8 @@ class DualLinearClassifier(BaseEstimator):
 
     def fit(self, X, y, sample_weight=None):
         cw = None if sample_weight is not None else self.class_weight
-        self.svc_1_ = LinearSVC(C=self.c_svc * 0.55, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
-        self.svc_2_ = LinearSVC(C=self.c_svc * 1.15, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
+        self.svc_1_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 0.75, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
+        self.svc_2_ = LinearSVC(penalty="l1", loss="squared_hinge", dual=False, C=self.c_svc * 1.0, class_weight=cw, tol=1e-2, max_iter=500, random_state=self.seed + 7)
         self.ridge_1_ = RidgeClassifier(alpha=self.alpha_ridge * 0.6, solver="auto", class_weight=cw, random_state=self.seed)
         self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="auto", class_weight=cw, random_state=self.seed + 7)
 
@@ -1629,10 +1633,12 @@ class StylometricMultiMomentPooler(nn.Module):
     Multi-Moment (CLS + Mean + Max-Spike + Std-Dispersion) Pooler for Transformer Encoders (BGE / DeBERTa).
     Normalizes each statistical moment independently before projection so extreme h_max spikes
     never drown out h_mean or syntactic dispersion h_std.
+    Supports Multi-Layer Hidden State Fusion across discourse (-1), syntax (-3), and surface structure (-6).
     """
     def __init__(self, hidden_size: int):
         super().__init__()
         self.hidden_size = hidden_size
+        self.layer_mix_weights = nn.Parameter(torch.zeros(3))
         self.norm_cls = nn.LayerNorm(hidden_size)
         self.norm_mean = nn.LayerNorm(hidden_size)
         self.norm_max = nn.LayerNorm(hidden_size)
@@ -1641,6 +1647,7 @@ class StylometricMultiMomentPooler(nn.Module):
         self.activation = nn.GELU()
         self.norm_out = nn.LayerNorm(hidden_size)
         self._current_mask = None
+        self._extra_layers = None
         nn.init.xavier_uniform_(self.dense.weight, gain=0.5)
         nn.init.zeros_(self.dense.bias)
 
@@ -1653,6 +1660,14 @@ class StylometricMultiMomentPooler(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         mask = attention_mask if attention_mask is not None else self._current_mask
+        if self._extra_layers is not None and len(self._extra_layers) == 3:
+            w = F.softmax(self.layer_mix_weights, dim=0)
+            h_fused = None
+            for idx, h_l in enumerate(self._extra_layers):
+                h_l_dev = h_l.to(device=hidden_states.device, dtype=hidden_states.dtype)
+                h_fused = (w[idx] * h_l_dev) if h_fused is None else (h_fused + w[idx] * h_l_dev)
+            hidden_states = h_fused
+            self._extra_layers = None
         h_cls = self.norm_cls(hidden_states[:, 0])
         if mask is not None:
             m = mask.to(device=hidden_states.device, dtype=hidden_states.dtype).unsqueeze(-1)
@@ -1674,17 +1689,28 @@ class StylometricMultiMomentPooler(nn.Module):
         return self.norm_out(self.activation(self.dense(fused)))
 
 
-def set_model_pooler_mask(model, mask):
-    """Passes current batch attention mask to StylometricMultiMomentPooler if present."""
+def get_model_pooler(model):
+    """Retrieves StylometricMultiMomentPooler from DeBERTa, BERT/BGE, or generic model."""
     candidates = [
         getattr(model, "pooler", None),
         getattr(getattr(model, "bert", None), "pooler", None),
         getattr(getattr(model, "deberta", None), "pooler", None),
         getattr(getattr(model, "model", None), "pooler", None),
     ]
-    for pooler in candidates:
-        if pooler is not None and hasattr(pooler, "set_mask"):
-            pooler.set_mask(mask)
+    for p in candidates:
+        if p is not None and hasattr(p, "layer_mix_weights"):
+            return p
+    for p in candidates:
+        if p is not None and hasattr(p, "dense"):
+            return p
+    return None
+
+
+def set_model_pooler_mask(model, mask):
+    """Passes current batch attention mask to StylometricMultiMomentPooler if present."""
+    pooler = get_model_pooler(model)
+    if pooler is not None and hasattr(pooler, "set_mask"):
+        pooler.set_mask(mask)
 
 
 class FocalLoss(nn.Module):
@@ -1695,7 +1721,7 @@ class FocalLoss(nn.Module):
     alpha (class weights) additionally up-weights rare classes.
     Sibling difficulty margins Delta_c force larger angular separation for ambiguous sibling cliques.
     """
-    def __init__(self, weight=None, gamma=1.0, label_smoothing=0.05, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None):
+    def __init__(self, weight=None, gamma=1.0, label_smoothing=0.01, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None):
         super().__init__()
         self.gamma = gamma
         self.label_smoothing = label_smoothing
@@ -1884,48 +1910,57 @@ def get_optimizer_grouped_parameters(model, lr_head, lr_backbone, layer_decay=0.
 
 # --- 6. UNIFIED HIGH-THROUGHPUT TRANSFORMER TRAINING (GPU 0 & GPU 1) ---
 
-def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_classes):
+def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_classes, enc_data_tta=None):
     """
-    Length-sorted batched inference for encoder models.
+    Length-sorted batched inference for encoder models with eval_bs=32 and Multi-Layer Fusion.
     Groups evaluation passages by length to eliminate redundant padding tokens,
     then inverts the sort order back to the original index sequence.
+    Optionally evaluates enc_data_tta and averages test predictions (Test-Time Augmentation).
     """
-    n_samples = len(enc_data["input_ids"]) if "input_ids" in enc_data else 0
-    if n_samples == 0:
-        return np.zeros((0, num_classes), dtype=np.float64)
+    def _eval_single(enc):
+        n_samples = len(enc["input_ids"]) if "input_ids" in enc else 0
+        if n_samples == 0:
+            return np.zeros((0, num_classes), dtype=np.float64)
+        lengths = [len(x) for x in enc["input_ids"]]
+        sort_idx = np.argsort(lengths)
+        all_logits = []
+        eval_bs = 32  # Memory-safe for Tesla T4 under L=448
+        cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
+        pooler = get_model_pooler(model)
+        with inference_context():
+            for start in range(0, n_samples, eval_bs):
+                end = min(start + eval_bs, n_samples)
+                batch_indices = sort_idx[start:end]
+                sl = {
+                    "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                    "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                }
+                if "token_type_ids" in enc:
+                    sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                kw = {
+                    "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
+                    "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
+                }
+                if "token_type_ids" in padded:
+                    kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
+                with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                        set_model_pooler_mask(model, kw["attention_mask"])
+                        logits = model(**kw).logits
+                all_logits.append(logits.float().cpu().numpy())
+        set_model_pooler_mask(model, None)
+        sorted_logits = np.concatenate(all_logits, axis=0)
+        inv_idx = np.empty_like(sort_idx)
+        inv_idx[sort_idx] = np.arange(len(sort_idx))
+        return sorted_logits[inv_idx]
+
     model.eval()
-    lengths = [len(x) for x in enc_data["input_ids"]]
-    sort_idx = np.argsort(lengths)
-    all_logits = []
-    eval_bs = 64
-    cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
-    with inference_context():
-        for start in range(0, n_samples, eval_bs):
-            end = min(start + eval_bs, n_samples)
-            batch_indices = sort_idx[start:end]
-            sl = {
-                "input_ids": [enc_data["input_ids"][j] for j in batch_indices],
-                "attention_mask": [enc_data["attention_mask"][j] for j in batch_indices],
-            }
-            if "token_type_ids" in enc_data:
-                sl["token_type_ids"] = [enc_data["token_type_ids"][j] for j in batch_indices]
-            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-            kw = {
-                "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
-                "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
-            }
-            if "token_type_ids" in padded:
-                kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
-            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                set_model_pooler_mask(model, kw["attention_mask"])
-                logits = model(**kw).logits
-            all_logits.append(logits.float().cpu().numpy())
-    set_model_pooler_mask(model, None)
-    sorted_logits = np.concatenate(all_logits, axis=0)
-    inv_idx = np.empty_like(sort_idx)
-    inv_idx[sort_idx] = np.arange(len(sort_idx))
-    res = sorted_logits[inv_idx]
-    return res
+    base_logits = _eval_single(enc_data)
+    if enc_data_tta is not None:
+        tta_logits = _eval_single(enc_data_tta)
+        return 0.5 * base_logits + 0.5 * tta_logits
+    return base_logits
 
 
 def check_finite_logits(logits: np.ndarray, name: str) -> np.ndarray:
@@ -1940,15 +1975,17 @@ def check_finite_logits(logits: np.ndarray, name: str) -> np.ndarray:
 
 
 @contextlib.contextmanager
-def capture_intermediate_layers(model, layer_indices=(-1, -5, -9)):
+def capture_intermediate_layers(model, layer_indices=(-1, -5, -9), target_pooler=None):
     """
-    Lightweight forward-hook capture of intermediate decoder layers (L1, L5, L9).
-    Captures ONLY the requested layers without materializing all 37 hidden state tuples,
-    saving ~3.5 GB of peak VRAM during forward passes.
+    Lightweight forward-hook capture of intermediate decoder/encoder layers.
+    If target_pooler is provided, injects the captured layers directly into the pooler
+    before it executes.
     """
     base_m = getattr(model, "base_model", model)
-    inner_m = getattr(base_m, "model", base_m)
-    dec_layers = getattr(inner_m, "layers", getattr(getattr(inner_m, "model", None), "layers", None))
+    inner_m = getattr(base_m, "encoder", getattr(base_m, "deberta", getattr(base_m, "bert", getattr(base_m, "model", base_m))))
+    dec_layers = getattr(inner_m, "layer", getattr(inner_m, "layers", getattr(getattr(inner_m, "encoder", None), "layer", None)))
+    if dec_layers is None and hasattr(model, "encoder") and hasattr(model.encoder, "layer"):
+        dec_layers = model.encoder.layer
     captured = {}
     handles = []
     if dec_layers is not None:
@@ -1959,6 +1996,8 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9)):
                 def _make_hook(i):
                     def _hook(m, inp, out):
                         captured[i] = out[0] if isinstance(out, tuple) else out
+                        if target_pooler is not None and len(captured) == len(layer_indices):
+                            target_pooler._extra_layers = [captured[x] for x in layer_indices]
                     return _hook
                 handles.append(dec_layers[actual_idx].register_forward_hook(_make_hook(idx)))
     try:
@@ -1966,63 +2005,72 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9)):
     finally:
         for h in handles:
             h.remove()
+        if target_pooler is not None:
+            target_pooler._extra_layers = None
 
 
-def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev, cuda_ok, num_classes):
+def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev, cuda_ok, num_classes, enc_data_tta=None):
     """
     Length-sorted batched inference for Qwen 3 8B / 2.5 7B LoRA decoder.
     Passes representations through backbone to SpikeAndGapHierarchicalHead or classification head.
+    Optionally evaluates enc_data_tta and averages test predictions (Test-Time Augmentation).
     """
-    n_samples = len(enc_data["input_ids"]) if "input_ids" in enc_data else 0
-    if n_samples == 0:
-        return np.zeros((0, num_classes), dtype=np.float64)
+    def _eval_single(enc):
+        n_samples = len(enc["input_ids"]) if "input_ids" in enc else 0
+        if n_samples == 0:
+            return np.zeros((0, num_classes), dtype=np.float64)
+        lengths = [len(x) for x in enc["input_ids"]]
+        sort_idx = np.argsort(lengths)
+        all_logits = []
+        inf_bs = 16
+        autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
+        with inference_context():
+            for start in range(0, n_samples, inf_bs):
+                end = min(start + inf_bs, n_samples)
+                batch_indices = sort_idx[start:end]
+                sl = {
+                    "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                    "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                }
+                padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                batch_kwargs = {
+                    "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
+                    "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
+                }
+                with autocast_ctx:
+                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                        out = backbone(**batch_kwargs, output_hidden_states=False)
+                        if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
+                            h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
+                        else:
+                            h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                        del out
+                        if isinstance(head, SpikeAndGapHierarchicalHead):
+                            logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
+                        else:
+                            last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                            if getattr(tokenizer, "padding_side", "left") == "left":
+                                pooled = last_h[:, -1, :].float()
+                            else:
+                                attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                pooled = last_h[batch_idx, seq_lens].float()
+                            logits = head(pooled.to(head_dev)).float().cpu().numpy()
+                        del h_input
+                all_logits.append(logits)
+        sorted_logits = np.concatenate(all_logits, axis=0)
+        inv_idx = np.empty_like(sort_idx)
+        inv_idx[sort_idx] = np.arange(len(sort_idx))
+        return sorted_logits[inv_idx]
+
     backbone.eval()
     head.eval()
-    lengths = [len(x) for x in enc_data["input_ids"]]
-    sort_idx = np.argsort(lengths)
-    all_logits = []
-    inf_bs = 16
-    autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-    with inference_context():
-        for start in range(0, n_samples, inf_bs):
-            end = min(start + inf_bs, n_samples)
-            batch_indices = sort_idx[start:end]
-            sl = {
-                "input_ids": [enc_data["input_ids"][j] for j in batch_indices],
-                "attention_mask": [enc_data["attention_mask"][j] for j in batch_indices],
-            }
-            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-            batch_kwargs = {
-                "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
-                "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
-            }
-            with autocast_ctx:
-                with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
-                    out = backbone(**batch_kwargs, output_hidden_states=False)
-                    if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
-                        h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
-                    else:
-                        h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                    del out
-                    if isinstance(head, SpikeAndGapHierarchicalHead):
-                        logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
-                    else:
-                        last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                        if getattr(tokenizer, "padding_side", "left") == "left":
-                            pooled = last_h[:, -1, :].float()
-                        else:
-                            attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                            seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                            batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                            pooled = last_h[batch_idx, seq_lens].float()
-                        logits = head(pooled.to(head_dev)).float().cpu().numpy()
-                    del h_input
-            all_logits.append(logits)
-    sorted_logits = np.concatenate(all_logits, axis=0)
-    inv_idx = np.empty_like(sort_idx)
-    inv_idx[sort_idx] = np.arange(len(sort_idx))
-    res = sorted_logits[inv_idx]
-    return res
+    base_logits = _eval_single(enc_data)
+    if enc_data_tta is not None:
+        tta_logits = _eval_single(enc_data_tta)
+        return 0.5 * base_logits + 0.5 * tta_logits
+    return base_logits
 
 
 def get_cosine_schedule_with_warmup_and_min_lr(
@@ -2062,13 +2110,14 @@ def train_transformer_fold(
     lr_backbone=1.5e-5,
     lr_head=1.2e-4,
     weight_decay=0.01,
-    label_smoothing=0.05,
+    label_smoothing=0.01,
     layer_decay=0.95,
     enable_grad_checkpointing=True,
     deadline=None,
     cached_enc_tr=None,
     cached_enc_va=None,
     cached_enc_te=None,
+    cached_enc_te_tta=None,
     cached_tokenizer=None,
     group_ids_tr=None,
     use_topic_masking=True,
@@ -2356,22 +2405,25 @@ def train_transformer_fold(
                     break
 
                 try:
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                        set_model_pooler_mask(model, batch_kwargs["attention_mask"])
-                        if topic_prep is not None and topic_prep.sift_eps > 0:
-                            emb = model.get_input_embeddings()(batch_kwargs["input_ids"])
-                            emb = topic_prep.apply_sift_embedding_noise(emb, batch_kwargs["attention_mask"])
-                            emb = emb.requires_grad_(True)
-                            kw_forward = {
-                                "inputs_embeds": emb,
-                                "attention_mask": batch_kwargs["attention_mask"],
-                            }
-                            if "token_type_ids" in batch_kwargs:
-                                kw_forward["token_type_ids"] = batch_kwargs["token_type_ids"]
-                            logits = model(**kw_forward).logits
-                        else:
-                            logits = model(**batch_kwargs).logits
-                        logits_f = logits.float()
+                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                    pooler_inst = get_model_pooler(model)
+                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler_inst):
+                        with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                            set_model_pooler_mask(model, batch_kwargs["attention_mask"])
+                            if topic_prep is not None and topic_prep.sift_eps > 0:
+                                emb = model.get_input_embeddings()(batch_kwargs["input_ids"])
+                                emb = topic_prep.apply_sift_embedding_noise(emb, batch_kwargs["attention_mask"])
+                                emb = emb.requires_grad_(True)
+                                kw_forward = {
+                                    "inputs_embeds": emb,
+                                    "attention_mask": batch_kwargs["attention_mask"],
+                                }
+                                if "token_type_ids" in batch_kwargs:
+                                    kw_forward["token_type_ids"] = batch_kwargs["token_type_ids"]
+                                logits = model(**kw_forward).logits
+                            else:
+                                logits = model(**batch_kwargs).logits
+                            logits_f = logits.float()
                         main_loss = criterion(logits_f, batch_labels)
                         fam_logits = compute_family_logits(logits_f, temp=4.0)
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
@@ -2535,7 +2587,7 @@ def train_transformer_fold(
     elif best_state is not None:
         model.load_state_dict({k: v.to(dev) for k, v in best_state.items()})
 
-    test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels))
+    test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels), enc_data_tta=cached_enc_te_tta)
 
     set_model_pooler_mask(model, None)
     del model, optimizer, scheduler, epoch_states
@@ -2599,6 +2651,7 @@ def train_qwen_lora_fold(
     cached_enc_tr=None,
     cached_enc_va=None,
     cached_enc_te=None,
+    cached_enc_te_tta=None,
     cached_tokenizer=None,
     group_ids_tr=None,
     retain_backbone: bool = False,
@@ -2749,7 +2802,7 @@ def train_qwen_lora_fold(
     )
     cw = compute_smoothed_class_weights(y_tr_int, num_classes=len(labels), gamma=0.5)
     weight_tensor = torch.tensor(cw, dtype=torch.float32, device=head_dev)
-    criterion = FocalLoss(weight=weight_tensor, gamma=1.0, label_smoothing=0.05)
+    criterion = FocalLoss(weight=weight_tensor, gamma=1.0, label_smoothing=0.01)
     family_criterion = nn.CrossEntropyLoss().to(head_dev)
     FAMILY_AUX_WEIGHT = 0.25
     label_to_fam_tensor = torch.tensor(LABEL_TO_FAMILY_IDX, dtype=torch.long, device=head_dev)
@@ -2825,6 +2878,7 @@ def train_qwen_lora_fold(
                     break
 
                 try:
+                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
                     autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
                     with autocast_ctx:
                         with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
@@ -3023,7 +3077,7 @@ def train_qwen_lora_fold(
         if best_head_state is not None:
             head.load_state_dict(best_head_state)
 
-    test_logits = evaluate_qwen_split(backbone, head, enc_te, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
+    test_logits = evaluate_qwen_split(backbone, head, enc_te, tokenizer, first_dev, head_dev, cuda_ok, len(labels), enc_data_tta=cached_enc_te_tta)
 
     del head, optimizer, scheduler, epoch_lora_states, epoch_head_states
     if "swa_lora" in locals():

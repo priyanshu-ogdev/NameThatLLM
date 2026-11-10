@@ -631,7 +631,8 @@ def build_v5_dry_run():
 if __name__ == "__main__":
     run_dry_run_verifier()
 '''
-    Path("notebooks/kaggle_dry_run.py").write_text(dry_run_code, encoding="utf-8")
+    with open("notebooks/kaggle_dry_run.py", "w", encoding="utf-8", newline="\n") as f:
+        f.write(dry_run_code)
     print("Updated notebooks/kaggle_dry_run.py successfully.")
 
 if __name__ == "__main__":

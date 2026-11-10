@@ -1,0 +1,80 @@
+{
+  "repo": "Qwen/Qwen3-8B-Base",
+  "revision": "49e3418fbbbca6ecbdf9608b4d22e5a407081db4",
+  "files": {
+    ".gitattributes": {
+      "sha256": null,
+      "size": 1519,
+      "git_blob": "a6344aac8c09253b3b630fb776ae94478aa0275b"
+    },
+    "README.md": {
+      "sha256": null,
+      "size": 2938,
+      "git_blob": "b1245241382ca7935c5a6b1fce4560fde0b7e50c"
+    },
+    "config.json": {
+      "sha256": null,
+      "size": 729,
+      "git_blob": "c5c5b1c67be484bcdb225c060f942736988c3c66"
+    },
+    "generation_config.json": {
+      "sha256": null,
+      "size": 138,
+      "git_blob": "cbbb3133034e192527e5321b4c679154e4819ab8"
+    },
+    "merges.txt": {
+      "sha256": null,
+      "size": 1671853,
+      "git_blob": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7"
+    },
+    "model-00001-of-00005.safetensors": {
+      "sha256": "9983f1b9ef2f60e7c3730d9bc11ada914e6ec630639b5b020a89bd158cd0446b",
+      "size": 3996250744,
+      "git_blob": "65b4e80880dc61db20dc3fbe08dfcf7391de638e"
+    },
+    "model-00002-of-00005.safetensors": {
+      "sha256": "9aa12339835bf7a093d3d0b0a0d2d77f8538301cfc7f8e7ec7a585858ebf7a1f",
+      "size": 3993160032,
+      "git_blob": "f8eb10c41ddbcc755c77cb08c3f46b9989208cab"
+    },
+    "model-00003-of-00005.safetensors": {
+      "sha256": "c7dd5a191c8da555def0714550375b3c0117751add408fcdda0c2a79ac0186bc",
+      "size": 3959604768,
+      "git_blob": "f6e8c756a56123fee1dd560cea1d8fb9d36117eb"
+    },
+    "model-00004-of-00005.safetensors": {
+      "sha256": "ad8b708792105133e03fe19e2d56c89c709f677f01285f8b3ede8947d59fd9fe",
+      "size": 3187841392,
+      "git_blob": "d0c5dac5febe55477ef640a1342c38c689dafa1b"
+    },
+    "model-00005-of-00005.safetensors": {
+      "sha256": "fbf24915d47ea030bb68ab0b9488f4515a907185baa6dc26837c9c3f2326a550",
+      "size": 1244659840,
+      "git_blob": "dbcc2c103433edbb807309c9867e2cedc638a027"
+    },
+    "model.safetensors.index.json": {
+      "sha256": null,
+      "size": 32878,
+      "git_blob": "041fe9a0d3ab9c8895f264e7a3a60aa563398d7c"
+    },
+    "tokenizer.json": {
+      "sha256": null,
+      "size": 7031645,
+      "git_blob": "443909a61d429dff23010e5bddd28ff530edda00"
+    },
+    "tokenizer_config.json": {
+      "sha256": null,
+      "size": 9678,
+      "git_blob": "6a3829ee9491f36113e64df37573be81df0366f5"
+    },
+    "vocab.json": {
+      "sha256": null,
+      "size": 2776833,
+      "git_blob": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    }
+  },
+  "source": "https://huggingface.co/api/models/Qwen/Qwen3-8B-Base?blobs=true",
+  "checked_date": "2026-10-25",
+  "license": "Apache-2.0",
+  "actual_8b_weights_downloaded_in_cloud": false
+}

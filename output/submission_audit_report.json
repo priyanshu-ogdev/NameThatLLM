@@ -1,0 +1,24 @@
+{
+  "submission_path": "output\\submission.parquet",
+  "size_bytes": 1946,
+  "row_count": 18,
+  "passed_all_checks": true,
+  "class_counts": {
+    "claude-opus-4-6": 3,
+    "gpt-5.5": 1,
+    "gpt-5.6-luna": 1,
+    "gpt-5.6-sol": 1,
+    "gpt-5.6-terra": 1,
+    "gpt-6-astra": 1,
+    "gemini-3.1-pro-preview": 1,
+    "gemini-3.6-flash": 1,
+    "gemini-3.7-flash": 1,
+    "gemini-3.8-flash": 1,
+    "claude-fable-5": 1,
+    "claude-opus-4-8": 1,
+    "claude-opus-5": 1,
+    "claude-sonnet-5": 1,
+    "qwen3.8-max": 1,
+    "glm-5.3": 1
+  }
+}

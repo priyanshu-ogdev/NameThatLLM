@@ -1,0 +1,10 @@
+{
+  "source": "User reported successful combined Kaggle submission in chat",
+  "public_balanced_accuracy": 0.417,
+  "cpu_reference_public_balanced_accuracy": 0.372,
+  "gain_percentage_points": 4.5,
+  "combined_grouped_oof_balanced_accuracy": 0.4093263733532189,
+  "notebook_version": "Not supplied",
+  "private_leaderboard_score": null,
+  "independently_fetched_from_kaggle": false
+}

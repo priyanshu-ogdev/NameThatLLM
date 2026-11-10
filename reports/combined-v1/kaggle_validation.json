@@ -1,0 +1,39 @@
+{
+  "combined": 0.4093263733532189,
+  "cpu": 0.37560278399204566,
+  "folds": [
+    {
+      "combined": 0.4003192848020435,
+      "cpu": 0.3650063856960408,
+      "fold": 0,
+      "qwen": 0.368837803320562
+    },
+    {
+      "combined": 0.437037037037037,
+      "cpu": 0.3925925925925926,
+      "fold": 1,
+      "qwen": 0.35555555555555557
+    },
+    {
+      "combined": 0.40555555555555556,
+      "cpu": 0.3796296296296296,
+      "fold": 2,
+      "qwen": 0.34814814814814815
+    },
+    {
+      "combined": 0.38888888888888884,
+      "cpu": 0.3574074074074074,
+      "fold": 3,
+      "qwen": 0.35000000000000003
+    },
+    {
+      "combined": 0.41481481481481475,
+      "cpu": 0.38333333333333336,
+      "fold": 4,
+      "qwen": 0.3333333333333333
+    }
+  ],
+  "note": "Fixed blend on original reused prompt folds; selected base configurations; not an independent holdout or leaderboard score.",
+  "qwen": 0.3511881680338056,
+  "qwen_correct_on_cpu_errors": 417
+}

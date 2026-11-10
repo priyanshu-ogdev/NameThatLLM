@@ -1,0 +1,37 @@
+{
+  "data_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "fold_sha256": "d019f60a2cfaab61dcbb73f64a8c126b0871ff037c23142ef45b81c4cdab6804",
+  "encoder_provenance": {
+    "kaggle_ref": "happenmass/bge-small-en-v1.5/transformers/bge/2",
+    "license": "MIT",
+    "archive_sha256": "952f6b1903d5a00a38fcbe676fb3c6a454c15a3629a92b9ccd3860a9d97cfbb5",
+    "files": {
+      "tokenizer_config.json": "ac4db152b467998d8ded6c68803f885b964945df9dda3d58fea1f5d4cb55b882",
+      "config_sentence_transformers.json": "95c99da340dd269a334c4345a947b04a994d5f62dcc26b85f8bdec0edc2212c8",
+      "vocab.txt": "b49e80874c5efbc7f4cde245a812673b05ef1360ced56b8bc8c750eaeef3fe0f",
+      "model.safetensors": "3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad",
+      "config.json": "ed28a1473be0881f49b6d85918180ad2109d79f9739522c5f8ee056c5229af1e",
+      "tokenizer.json": "ffb28886478b9b17a8c06f4fe6741b970d5dd3de13330ccc3b9f686df8a0545a",
+      "modules.json": "e7989e94b5b809d895a9521b708312c1ccd333e183effebaf3838908da2acd53",
+      "README.md": "ab6848b4fbe349013db3d513dc64d8c3e5e8828ec4b3d4668de7c056d7407786",
+      ".gitattributes": "88023d0a029a0c409b30c03b689c68605b559f5cefe06376e4a26b38ed795269",
+      "sentence_bert_config.json": "98d7e2cd3c1622e5d59a094cb12259f051fbe93ddb61f28a71e59bf3274ce038",
+      "special_tokens_map.json": "3c3507f36dff57bce437223db3b3081d1e2b52ec3e56ee55438193ecb2c94dd6",
+      "1_Pooling/config.json": "f1f1a72f67a834e884d965751b4250679628a68e68db9a6a7a5fe05ce0b501ed"
+    }
+  },
+  "extraction": {
+    "seconds": 338.9818720029998,
+    "max_length": 512,
+    "truncated_rows": 0,
+    "batch_size": 16,
+    "max_observed_tokens": 381,
+    "threads": 2
+  },
+  "extra_versions": {
+    "torch": "2.8.0+cpu",
+    "transformers": "4.57.6",
+    "safetensors": "0.7.0"
+  },
+  "embedding_sha256": "1021a20b2c62429fd80a98cfffd263229418dc47eeff44491cf80a1cc0bdfe14"
+}

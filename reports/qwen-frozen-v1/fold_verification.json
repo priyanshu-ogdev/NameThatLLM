@@ -1,0 +1,18 @@
+{
+  "purpose": "Verify identical original competition folds; no classifier training in this check",
+  "training_rows": 2699,
+  "prompt_groups": 150,
+  "classes": 18,
+  "fold_rows": [
+    539,
+    540,
+    540,
+    540,
+    540
+  ],
+  "training_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "fold_sha256": "d019f60a2cfaab61dcbb73f64a8c126b0871ff037c23142ef45b81c4cdab6804",
+  "matches_original_folds": true,
+  "full_qwen_cv": "unrun",
+  "gpu_execution": "unrun"
+}

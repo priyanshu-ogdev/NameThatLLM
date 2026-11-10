@@ -1,0 +1,31 @@
+{
+  "oof.csv": {
+    "sha256": "28f13b71686a753e4c4ca3e0a4d88983b74a30183640a74e6c81af97f6badb7b",
+    "size_bytes": 116506
+  },
+  "decision_scores.npy": {
+    "sha256": "df91d04b47b60d4e51da27ec9f0582a9fbfd8d95a162cac8274982a3510579fa",
+    "size_bytes": 194456
+  },
+  "comparison.csv": {
+    "sha256": "6ddacd86e11722f912b026d8b52911f2d5ebf75326f318bd225726c6c395a08e",
+    "size_bytes": 886
+  },
+  "confusion.csv": {
+    "sha256": "41d7b67017e2ab6fc564625e7eb167562556aabbd664ec69a5a3c460472a3a89",
+    "size_bytes": 1239
+  },
+  "per_class.csv": {
+    "sha256": "b65b7b9c278e7cac224a6ed8e888c6b2bfef7bbb788e05e907f93fc76268f0e0",
+    "size_bytes": 525
+  },
+  "summary.json": {
+    "sha256": "b32219f40987278e99445ed27b232b89a9a9c9e3dade729a5bbe0da6574445bd",
+    "size_bytes": 4555
+  },
+  "private_backup_archive": {
+    "path": "artifacts/qwen-kaggle-v1-reports.zip",
+    "sha256": "2de6cbc4d46732bb409441e9af6cca1e7b601a951a6efb8f05aeb58cd6525911",
+    "size_bytes": 203532
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "checked_date": "2026-10-24",
+  "source": "Kaggle public model list API",
+  "candidates": [
+    {
+      "ref": "qwen-lm/qwen-3",
+      "variant": "8b-base",
+      "framework": "transformers",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 15.27,
+      "url": "https://www.kaggle.com/models/qwen-lm/qwen-3/Transformers/8b-base"
+    },
+    {
+      "ref": "qwen-lm/qwen-3",
+      "variant": "14b-base",
+      "framework": "transformers",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 27.52,
+      "url": "https://www.kaggle.com/models/qwen-lm/qwen-3/Transformers/14b-base"
+    },
+    {
+      "ref": "qwen-lm/qwen-3",
+      "variant": "32b",
+      "framework": "transformers",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 61.04,
+      "url": "https://www.kaggle.com/models/qwen-lm/qwen-3/Transformers/32b"
+    },
+    {
+      "ref": "keras/qwen3-5",
+      "variant": "qwen3_5_4b_base",
+      "framework": "keras",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 16.92,
+      "url": "https://www.kaggle.com/models/keras/qwen3-5/Keras/qwen3_5_4b_base"
+    },
+    {
+      "ref": "keras/qwen3-5",
+      "variant": "qwen3_5_9b_base",
+      "framework": "keras",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 35.07,
+      "url": "https://www.kaggle.com/models/keras/qwen3-5/Keras/qwen3_5_9b_base"
+    },
+    {
+      "ref": "google/gemma-4",
+      "variant": "gemma-4-12b",
+      "framework": "transformers",
+      "version": 2,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 22.31,
+      "url": "https://www.kaggle.com/models/google/gemma-4/Transformers/gemma-4-12b"
+    },
+    {
+      "ref": "google/gemma-4",
+      "variant": "gemma-4-31b",
+      "framework": "transformers",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 58.28,
+      "url": "https://www.kaggle.com/models/google/gemma-4/Transformers/gemma-4-31b"
+    },
+    {
+      "ref": "google/gemma-3",
+      "variant": "gemma-3-4b-pt",
+      "framework": "pyTorch",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Gemma",
+      "size_gib": 8.05,
+      "url": "https://www.kaggle.com/models/google/gemma-3/PyTorch/gemma-3-4b-pt"
+    },
+    {
+      "ref": "keras/deberta_v3",
+      "variant": "deberta_v3_large_en",
+      "framework": "keras",
+      "version": 3,
+      "fine_tunable": true,
+      "license": "Apache 2.0",
+      "size_gib": 1.62,
+      "url": "https://www.kaggle.com/models/keras/deberta_v3/Keras/deberta_v3_large_en"
+    },
+    {
+      "ref": "metaresearch/llama-3.1",
+      "variant": "8b",
+      "framework": "pyTorch",
+      "version": 1,
+      "fine_tunable": true,
+      "license": "Llama 3.1 Community License",
+      "size_gib": 14.96,
+      "url": "https://www.kaggle.com/models/metaresearch/llama-3.1/PyTorch/8b"
+    }
+  ]
+}

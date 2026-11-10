@@ -1,0 +1,14 @@
+{
+  "notebook_sha256": "eb829fbb4e738164ebea5b35670d465d0df646174b0e1266393714dfe0348b25",
+  "zip_input_run_rows": 3,
+  "extracted_input_repeat_run_rows": 3,
+  "scale_run_rows": 4000,
+  "scale_predictions_identical_to_cli": true,
+  "scale_output_sha256": "1cfce3c88f6930a7a47f186c96efa8d0e0e31f932d9ad6564b3e16ce23f66061",
+  "repeated_run_submission_sha256": "4382c7afc908006602ab8a8013b7c08ebba59be1a670372af48b502899454247",
+  "bundle_sha256": "60c003b9f29c127f79601dc6da756228611ea699e5e333eaec0fd75489b28266",
+  "unit_tests_passed": 33,
+  "runtime": "Local Linux x86-64 / Python 3.12; actual Kaggle run remains to be performed",
+  "offline_install": "--no-index from bundled wheels, fresh temporary install target",
+  "change": "ZIP or extracted input, repeatable Run All, validated atomic output replacement, prediction preview"
+}

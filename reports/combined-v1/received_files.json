@@ -1,0 +1,31 @@
+{
+  "per_class.csv": {
+    "sha256": "b9b1d970b20031d0af8f718e5ef2c0a975ec647ec976a5a33bef5efca4894896",
+    "size_bytes": 530
+  },
+  "confusion.csv": {
+    "sha256": "473c3fcf4c4f684cabcdb546ffc5fd91645769828ee9019d9e04bdb6566c6e65",
+    "size_bytes": 1238
+  },
+  "oof_scores.npz": {
+    "sha256": "d4f9191ca66de06cf8539eadb84766938ce5434d6274f685bd8c67c576222535",
+    "size_bytes": 733224
+  },
+  "summary.json": {
+    "sha256": "7d3bb1bf8a1275424f33827368a585a2eb3eaec9dc03a3c9c567d54cb5989ee9",
+    "size_bytes": 3630
+  },
+  "oof.csv": {
+    "sha256": "d8fdc45a5837247ca191033aecf7247a24baa63aa0277e7674ba8cea81016325",
+    "size_bytes": 192828
+  },
+  "validation.json": {
+    "sha256": "610d7ceb3eca9acf9a998fb39f330e7e0c0144840cd9712deb29b548a6b1cd44",
+    "size_bytes": 963
+  },
+  "backup": {
+    "path": "artifacts/combined-kaggle-v1-reports.zip",
+    "sha256": "757fccdc187aa677545278775a5067523a4a4e585d148d0fc2466efbb5ed39ae",
+    "size_bytes": 772737
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "created_utc": "2026-10-22T07:27:28.088743+00:00",
+  "git_commit": "9fdd233a92baa02c49d856c1abe4ef2c0773a82d",
+  "git_dirty": false,
+  "python": "3.12.14",
+  "versions": {
+    "name-that-llm": "0.2.0",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scipy": "1.17.0",
+    "scikit-learn": "1.8.0",
+    "joblib": "1.5.3",
+    "pyarrow": "23.0.1"
+  },
+  "rows": 4000,
+  "seconds": 12.555543620000208,
+  "process_peak_rss_mib": 394.17578125,
+  "model_sha256": "f635a5d7b1f0dd69ace1bcf1598ae8f979d54142556adffd232df06841b8972f",
+  "source_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "note": "Repeated available passages; runtime proxy only. Recheck using representative real passage lengths and final artifact."
+}

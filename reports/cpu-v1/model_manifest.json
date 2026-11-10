@@ -1,0 +1,41 @@
+{
+  "created_utc": "2026-10-22T07:26:36.750292+00:00",
+  "git_commit": "9fdd233a92baa02c49d856c1abe4ef2c0773a82d",
+  "git_dirty": false,
+  "python": "3.12.14",
+  "versions": {
+    "name-that-llm": "0.2.0",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scipy": "1.17.0",
+    "scikit-learn": "1.8.0",
+    "joblib": "1.5.3",
+    "pyarrow": "23.0.1"
+  },
+  "candidate": "multi_c150_s020",
+  "seed": 42,
+  "data_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "rows": 2699,
+  "seconds": 33.75371589799988,
+  "model_sha256": "f635a5d7b1f0dd69ace1bcf1598ae8f979d54142556adffd232df06841b8972f",
+  "labels": [
+    "gpt-5.5",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-astra",
+    "gemini-3.1-pro-preview",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+    "claude-fable-5",
+    "claude-opus-4-6",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "qwen3.8-max",
+    "glm-5.3",
+    "glm-5.3-flash",
+    "kimi-k3"
+  ]
+}

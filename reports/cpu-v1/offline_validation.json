@@ -1,0 +1,12 @@
+{
+  "rows": 4000,
+  "test_source": "4000 deterministic samples of authorized training passages with new synthetic IDs; timing/format check only",
+  "outputs_identical_to_cli": true,
+  "output_sha256": "1cfce3c88f6930a7a47f186c96efa8d0e0e31f932d9ad6564b3e16ce23f66061",
+  "model_sha256": "f635a5d7b1f0dd69ace1bcf1598ae8f979d54142556adffd232df06841b8972f",
+  "notebook_sha256_before_markdown_update": "11c4bf0c97427ed84ce53229f2a803f792416f5a94cef6d4cac4975bc9543900",
+  "pip_mode": "--no-index, --find-links attached wheels, --only-binary=:all:, isolated install target",
+  "inference_seconds_including_load_and_parquet": 14.123753843000031,
+  "wall_seconds_including_offline_install_and_predict": 20.39203720000023,
+  "scope": "Exact notebook code cells executed locally on Python 3.12/Linux; Kaggle runtime not yet executed"
+}

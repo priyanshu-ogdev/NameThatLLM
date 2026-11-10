@@ -1,0 +1,74 @@
+{
+  "balanced_accuracy": {
+    "cpu": 0.37560278399204566,
+    "fixed_equal_rank_blend_diagnostic": 0.4093263733532189,
+    "qwen": 0.3511881680338056
+  },
+  "blend_limitations": "Exploratory fixed blend of already selected models on reused folds; not an independent holdout or a leaderboard score. No deployment or full-model blend runtime test yet.",
+  "blend_rule": "Equal per-row ranks of 18 decision scores; break rank-sum ties by CPU decision score. No label-fitted weights, thresholds or calibration.",
+  "bootstrap_limitations": "Conditional on preselected candidates and existing OOF models; excludes model-selection optimism and refitting uncertainty.",
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 2026,
+  "conditional_paired_prompt_bootstrap_95pct": {
+    "fixed_rank_blend_minus_cpu": [
+      0.017054001988565753,
+      0.0507407407407407
+    ],
+    "qwen_minus_cpu": [
+      -0.04592592592592604,
+      -0.002910191231499929
+    ]
+  },
+  "paired_correctness_counts": {
+    "both_correct": 531,
+    "cpu_only_correct": 483,
+    "neither_correct": 1268,
+    "qwen_only_correct": 417
+  },
+  "prediction_agreement_fraction": 0.32308262319377545,
+  "provenance": {
+    "device": "cuda:0",
+    "dtype": "torch.bfloat16",
+    "license": "Apache-2.0",
+    "packages": {
+      "numpy": "2.1.3",
+      "pandas": "2.3.3",
+      "pyarrow": "23.0.1",
+      "safetensors": "0.8.0",
+      "scikit-learn": "1.6.1",
+      "torch": "2.11.0+cu128",
+      "transformers": "5.16.1"
+    },
+    "repo": "Qwen/Qwen3-1.7B-Base",
+    "resource_sha256": {
+      "config.json": "1bb33a92c3548fbc68b889b490e810440435253598835bd71dff0396060c12db",
+      "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+      "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "tokenizer_config.json": "5a7303fcb1a27ede63134a2cbd61d5282c247ca6d769ce4746d4ffa124aedd63",
+      "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    "seed": 42,
+    "source": "qwen-lm/qwen-3/transformers/1.7b-base/1",
+    "upstream_weight_revision": "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+    "weight_sha256": "6df85b39330e5a425ee36253d0f894e4387e4f0a15b9c53cb467d668e6b3a841"
+  },
+  "qwen_correct_on_cpu_errors_fraction": 0.24747774480712167,
+  "qwen_decision_argmax_balanced_accuracy": 0.35563261247825007,
+  "qwen_decision_argmax_vs_predict_agreement": 0.9699888847721378,
+  "runtime": {
+    "classifier_4000_seconds": 10.260106775000168,
+    "total_seconds": 991.4929820740001,
+    "train_extraction_seconds": 577.0281689579999,
+    "training_truncated_rows": 0
+  },
+  "validated": {
+    "candidate_summary_consistent": true,
+    "classes": 18,
+    "confusion_and_class_recall_reconstructed": true,
+    "finite_decision_scores": true,
+    "oof_truth_and_order": true,
+    "original_data_and_fold_hashes": true,
+    "prompts": 150,
+    "rows": 2699
+  }
+}

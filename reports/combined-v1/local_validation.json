@@ -1,0 +1,36 @@
+{
+  "combined_prediction_seconds": 9.018240420031361,
+  "cpu_fit_rows": 2699,
+  "historical_oof_score_reproduced_by_production_rule": 0.4093263733532189,
+  "historical_qwen_correct_on_cpu_errors_verified": 417,
+  "limitations": "CPU functional check. Qwen head fits 18 real passages, not all 2699; 4000 rows repeat their cached representations. Timing excludes extraction and understates full-head cost. No new competition score, full GPU run or hidden-test timing is claimed.",
+  "provenance": {
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "license": "Apache-2.0",
+    "packages": {
+      "numpy": "2.3.5",
+      "pandas": "2.2.3",
+      "pyarrow": "23.0.1",
+      "safetensors": "0.7.0",
+      "scikit-learn": "1.8.0",
+      "torch": "2.8.0+cpu",
+      "transformers": "4.57.6"
+    },
+    "repo": "Qwen/Qwen3-1.7B-Base",
+    "resource_sha256": {
+      "config.json": "1bb33a92c3548fbc68b889b490e810440435253598835bd71dff0396060c12db",
+      "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+      "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "tokenizer_config.json": "5a7303fcb1a27ede63134a2cbd61d5282c247ca6d769ce4746d4ffa124aedd63",
+      "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    "seed": 42,
+    "source": "qwen-lm/qwen-3/transformers/1.7b-base/1",
+    "upstream_weight_revision": "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+    "weight_sha256": "6df85b39330e5a425ee36253d0f894e4387e4f0a15b9c53cb467d668e6b3a841"
+  },
+  "real_frozen_transformer_rows": 18,
+  "submission_roundtrip_rows": 4000,
+  "total_seconds": 96.44402721500956
+}

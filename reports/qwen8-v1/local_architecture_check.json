@@ -1,0 +1,14 @@
+{
+  "actual_8b_weights_loaded": false,
+  "competition_score": null,
+  "cross_gpu_pooling_check": "unrun: no two CUDA devices in this cloud workspace",
+  "gpu_8b_pilot": "unrun",
+  "layers_pooled": [
+    18,
+    27,
+    36
+  ],
+  "masked_pooling_and_cache_resume": "passed",
+  "purpose": "Random tiny 36-layer Qwen3 CPU functional test, not pretrained 8B evaluation",
+  "zero_budget_stops_before_forward_and_preserves_cache": "passed"
+}

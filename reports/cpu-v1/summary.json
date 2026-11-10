@@ -1,0 +1,55 @@
+{
+  "data_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "fold_sha256": "d019f60a2cfaab61dcbb73f64a8c126b0871ff037c23142ef45b81c4cdab6804",
+  "selected_candidate": "multi_c150_s020",
+  "oof_balanced_accuracy": 0.37560278399204566,
+  "paired_prompt_bootstrap_delta_vs_word_lr_ci95": [
+    0.07709684684684681,
+    0.11151189207972524
+  ],
+  "bootstrap_seed": 2026,
+  "bootstrap_samples": 2000,
+  "source_manifests": [
+    {
+      "run": "runs/baselines-v1",
+      "manifest_sha256": "768171744a8f7ae55f03262af02a3f9644f85abe22eae6df823d728a9dd0f5dc"
+    },
+    {
+      "run": "runs/advanced-v1",
+      "manifest_sha256": "52be2143565638a559125b40deb057902dcbd66c382c187cc4678c87566a35b9"
+    },
+    {
+      "run": "runs/style-primal-v1",
+      "manifest_sha256": "d8aae2f3ce79556f4eea224db88363278e3a2061f2ec6b8b6d10d9a1c6da52f8"
+    },
+    {
+      "run": "runs/nonlinear-style-v1",
+      "manifest_sha256": "e61988d20810b4c3397870d276d921e3311e7d12bd600daab9c86f2b555f5367"
+    },
+    {
+      "run": "runs/rbf-text-v2",
+      "manifest_sha256": "7ea7d1d793ef952e3c32c967a6993f64475c6f6d62699546173242eda4969beb"
+    },
+    {
+      "run": "runs/prompt-residual-v1",
+      "manifest_sha256": "c61f7a74bcf444f5c9c5b798e5d587e8b147d92cda4a4d70ff6fa971fd9c5602"
+    },
+    {
+      "run": "runs/stacked-v1",
+      "manifest_sha256": "4e8fe4a15a5e154a594bd69e0624b3d8326c1981465aa8ab3fc8d8a7cb25653e"
+    },
+    {
+      "run": "runs/linear-grid-v1",
+      "manifest_sha256": "9680207a9ab2c51492f5fcefad6af413a4b904d70eb5913048404baef20b1804"
+    },
+    {
+      "run": "runs/linear-lowstyle-v1",
+      "manifest_sha256": "b21d6538916ee1501840cdbee21b2d5e2f2bd3233ff63dd6469254a5ce38612f"
+    },
+    {
+      "run": "runs/linear-midstyle-v1",
+      "manifest_sha256": "76f56b119f62496b4a72b17e10a75f9ea4e30655648ccb974a4ea6450da44ba0"
+    }
+  ],
+  "caveat": "Models were compared on these folds: selection optimism remains. Bootstrap intervals resample prompt groups and do not account for model selection, training randomness, or test distribution shift. This is not a leaderboard score. Stacking fits its combiner only on inner grouped OOF predictions."
+}

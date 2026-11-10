@@ -1,0 +1,14 @@
+{
+  "notebook_sha256": "95aaf3af8d22a9fb3c73b30398961bdc5b8aa290ba2a1384614736388b2695ef",
+  "python_script_sha256": "0c56213ef3d5794571539b7209a45057b05e07e68359f9c2c56b4edb883a33a4",
+  "script_and_notebook_code_ast_identical": true,
+  "training_rows": 2699,
+  "sample_test_rows": 3,
+  "scale_test_rows": 4000,
+  "training_seconds": 27.049453658008133,
+  "classifier_coefficients_match_saved_model_within_absolute_tolerance": 1e-09,
+  "sample_and_scale_predictions_match_saved_model": true,
+  "scale_output_sha256": "1cfce3c88f6930a7a47f186c96efa8d0e0e31f932d9ad6564b3e16ce23f66061",
+  "unit_tests_passed": 33,
+  "scope": "Locally tested CPU with existing scientific Python packages; actual Kaggle runtime remains untested. No model ZIP or ntl import required."
+}

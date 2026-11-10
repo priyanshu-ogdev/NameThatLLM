@@ -1,0 +1,114 @@
+{
+  "combined_classifier_4000_seconds": 27.882018057999858,
+  "fold_sha256": "d019f60a2cfaab61dcbb73f64a8c126b0871ff037c23142ef45b81c4cdab6804",
+  "historical_fixed_blend_oof": 0.4093263733532189,
+  "historical_qwen_correct_on_cpu_errors": 417,
+  "labels": [
+    "claude-fable-5",
+    "claude-opus-4-6",
+    "claude-opus-4-8",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "gemini-3.1-pro-preview",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+    "glm-5.3",
+    "glm-5.3-flash",
+    "gpt-5.5",
+    "gpt-5.6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-6-astra",
+    "kimi-k3",
+    "qwen3.8-max"
+  ],
+  "provenance": {
+    "device": "cuda:0",
+    "dtype": "torch.bfloat16",
+    "license": "Apache-2.0",
+    "packages": {
+      "numpy": "2.1.3",
+      "pandas": "2.3.3",
+      "pyarrow": "23.0.1",
+      "safetensors": "0.8.0",
+      "scikit-learn": "1.6.1",
+      "torch": "2.11.0+cu128",
+      "transformers": "5.16.1"
+    },
+    "repo": "Qwen/Qwen3-1.7B-Base",
+    "resource_sha256": {
+      "config.json": "1bb33a92c3548fbc68b889b490e810440435253598835bd71dff0396060c12db",
+      "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+      "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+      "tokenizer_config.json": "5a7303fcb1a27ede63134a2cbd61d5282c247ca6d769ce4746d4ffa124aedd63",
+      "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    "seed": 42,
+    "source": "qwen-lm/qwen-3/transformers/1.7b-base/1",
+    "upstream_weight_revision": "ea980cb0a6c2ae4b936e82123acc929f1cec04c1",
+    "weight_sha256": "6df85b39330e5a425ee36253d0f894e4387e4f0a15b9c53cb467d668e6b3a841"
+  },
+  "rule": "Equal ranks, CPU decision score breaks ties; Qwen middle_mean_linear; no ensemble fitting.",
+  "test_extraction": {
+    "cache_key": "8aa030c8bb480a2ca2e96aed27caf727a1824481a9217e301b570f085d15d01b",
+    "max_length": 512,
+    "resumed_rows": 0,
+    "rows": 3,
+    "seconds": 0.7444516549999207,
+    "tokens_max": 202,
+    "truncated_rows": 0
+  },
+  "test_rows": 3,
+  "test_sha256": "4545aa3a3459f4c0724f97ad5bd06c4caa3506bdfea5fab905e8203184fc0c57",
+  "total_seconds": 951.201907102,
+  "train_extraction": {
+    "cache_key": "d4aa522cd375a8b45786a5b616006ff64786275ac0158456a99624f0e6684834",
+    "max_length": 512,
+    "resumed_rows": 0,
+    "rows": 2699,
+    "seconds": 556.882416596,
+    "tokens_max": 381,
+    "truncated_rows": 0
+  },
+  "training_sha256": "40a22ce8d88c5f46feb4637a099db815bef5f713ffe53e89dbe1b7b21de77707",
+  "validation": {
+    "combined": 0.4093263733532189,
+    "cpu": 0.37560278399204566,
+    "folds": [
+      {
+        "combined": 0.4003192848020435,
+        "cpu": 0.3650063856960408,
+        "fold": 0,
+        "qwen": 0.368837803320562
+      },
+      {
+        "combined": 0.437037037037037,
+        "cpu": 0.3925925925925926,
+        "fold": 1,
+        "qwen": 0.35555555555555557
+      },
+      {
+        "combined": 0.40555555555555556,
+        "cpu": 0.3796296296296296,
+        "fold": 2,
+        "qwen": 0.34814814814814815
+      },
+      {
+        "combined": 0.38888888888888884,
+        "cpu": 0.3574074074074074,
+        "fold": 3,
+        "qwen": 0.35000000000000003
+      },
+      {
+        "combined": 0.41481481481481475,
+        "cpu": 0.38333333333333336,
+        "fold": 4,
+        "qwen": 0.3333333333333333
+      }
+    ],
+    "note": "Fixed blend on original reused prompt folds; selected base configurations; not an independent holdout or leaderboard score.",
+    "qwen": 0.3511881680338056,
+    "qwen_correct_on_cpu_errors": 417
+  }
+}

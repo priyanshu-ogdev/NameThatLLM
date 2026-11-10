@@ -1,0 +1,31 @@
+{
+  "evidence_source": "User-pasted Kaggle RESULT TO SHARE and SUCCESS log, October 23, 2026; full run reports not yet received",
+  "reported_result": {
+    "best_candidate": "middle_mean_linear",
+    "grouped_balanced_accuracy": 0.3511881680338056,
+    "old_cpu_grouped_score": 0.37560278399204566,
+    "elapsed_minutes": 16.524883034566667,
+    "gpu": "Tesla T4"
+  },
+  "delta_vs_cpu_percentage_points": -2.4414615958240073,
+  "submission_format_check": {
+    "status": "SUCCESS",
+    "visible_rows": 3
+  },
+  "qwen_public_leaderboard_score": null,
+  "remaining_gpu_quota": "Not established by elapsed runtime; session idle time may also count",
+  "independent_reproduction": false,
+  "decision": "Preserve selected CPU model; inspect frozen OOF complementarity before another submission or training run.",
+  "files_pending_at_initial_log": [
+    "summary.json",
+    "comparison.csv",
+    "middle_mean_linear/oof.csv",
+    "middle_mean_linear/decision_scores.npy"
+  ],
+  "follow_up": {
+    "all_six_requested_files_received": true,
+    "data_folds_and_oof_metrics_verified": true,
+    "paired_analysis": "paired_analysis.json",
+    "raw_files_retained_privately": true
+  }
+}

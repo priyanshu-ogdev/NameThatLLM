@@ -1,0 +1,25 @@
+{
+  "checks": {
+    "original_data_and_folds": true,
+    "aligned_2699_unique_oof_ids_truths_and_folds": true,
+    "all_18_class_labels": true,
+    "finite_2699_by_18_margins": true,
+    "production_rule_matches_all_oof_combined_predictions": true,
+    "per_class_and_confusion_reconstructed": true,
+    "all_five_folds_improve_over_both_models": true,
+    "backup_archive_readback_checksums": true
+  },
+  "balanced_accuracy": {
+    "cpu": 0.37560278399204566,
+    "qwen": 0.3511881680338056,
+    "combined": 0.4093263733532189
+  },
+  "qwen_correct_on_cpu_errors": 417,
+  "gain_vs_cpu_percentage_points": 3.3723589361173256,
+  "elapsed_minutes": 15.853365118366666,
+  "full_head_4000_seconds": 27.882018057999858,
+  "test_rows_reported": 3,
+  "submission_artifact_independently_inspected": false,
+  "leaderboard_score": null,
+  "recommendation": "Submit the successful Save & Run All notebook version; keep CPU baseline as reference. No automatic submission performed."
+}

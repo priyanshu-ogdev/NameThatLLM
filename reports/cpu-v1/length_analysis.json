@@ -1,0 +1,23 @@
+[
+  {
+    "min_words": 0,
+    "max_words_exclusive": 80,
+    "rows": 997,
+    "classes_present": 18,
+    "balanced_accuracy_present_classes": 0.31992259672697243
+  },
+  {
+    "min_words": 80,
+    "max_words_exclusive": 150,
+    "rows": 944,
+    "classes_present": 18,
+    "balanced_accuracy_present_classes": 0.36782909766368554
+  },
+  {
+    "min_words": 150,
+    "max_words_exclusive": 1000000,
+    "rows": 758,
+    "classes_present": 18,
+    "balanced_accuracy_present_classes": 0.4400549567102358
+  }
+]

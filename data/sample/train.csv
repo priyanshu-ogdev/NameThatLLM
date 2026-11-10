@@ -1,0 +1,1729 @@
+id,prompt_id,model,text
+synthetic-0-0,0,gpt-5.5,"Synthetic topic 0. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-0-1,0,gpt-5.6-luna,"Synthetic topic 0. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-0-2,0,gpt-5.6-sol,"Synthetic topic 0. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-0-3,0,gpt-5.6-terra,"Synthetic topic 0. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-0-4,0,gpt-6-astra,"Synthetic topic 0. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-0-5,0,gemini-3.1-pro-preview,"Synthetic topic 0. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-0-6,0,gemini-3.6-flash,"Synthetic topic 0. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-0-7,0,gemini-3.7-flash,"Synthetic topic 0. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-0-8,0,gemini-3.8-flash,"Synthetic topic 0. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-0-9,0,claude-fable-5,"Synthetic topic 0. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-0-10,0,claude-opus-4-6,"Synthetic topic 0. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-0-11,0,claude-opus-4-8,"Synthetic topic 0. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-0-12,0,claude-opus-5,"Synthetic topic 0. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-0-13,0,claude-sonnet-5,"Synthetic topic 0. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-0-14,0,qwen3.8-max,"Synthetic topic 0. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-0-15,0,glm-5.3,"Synthetic topic 0. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-0-16,0,glm-5.3-flash,"Synthetic topic 0. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-0-17,0,kimi-k3,"Synthetic topic 0. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 0. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-1-0,1,gpt-5.5,"Synthetic topic 1. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-1-1,1,gpt-5.6-luna,"Synthetic topic 1. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-1-2,1,gpt-5.6-sol,"Synthetic topic 1. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-1-3,1,gpt-5.6-terra,"Synthetic topic 1. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-1-4,1,gpt-6-astra,"Synthetic topic 1. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-1-5,1,gemini-3.1-pro-preview,"Synthetic topic 1. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-1-6,1,gemini-3.6-flash,"Synthetic topic 1. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-1-7,1,gemini-3.7-flash,"Synthetic topic 1. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-1-8,1,gemini-3.8-flash,"Synthetic topic 1. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-1-9,1,claude-fable-5,"Synthetic topic 1. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-1-10,1,claude-opus-4-6,"Synthetic topic 1. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-1-11,1,claude-opus-4-8,"Synthetic topic 1. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-1-12,1,claude-opus-5,"Synthetic topic 1. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-1-13,1,claude-sonnet-5,"Synthetic topic 1. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-1-14,1,qwen3.8-max,"Synthetic topic 1. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-1-15,1,glm-5.3,"Synthetic topic 1. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-1-16,1,glm-5.3-flash,"Synthetic topic 1. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-1-17,1,kimi-k3,"Synthetic topic 1. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 1. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-2-0,2,gpt-5.5,"Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-2-1,2,gpt-5.6-luna,"Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-2-2,2,gpt-5.6-sol,"Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-2-3,2,gpt-5.6-terra,"Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-2-4,2,gpt-6-astra,"Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-2-5,2,gemini-3.1-pro-preview,"Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-2-6,2,gemini-3.6-flash,"Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-2-7,2,gemini-3.7-flash,"Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-2-8,2,gemini-3.8-flash,"Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-2-9,2,claude-fable-5,"Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-2-10,2,claude-opus-4-6,"Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-2-11,2,claude-opus-4-8,"Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-2-12,2,claude-opus-5,"Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-2-13,2,claude-sonnet-5,"Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-2-14,2,qwen3.8-max,"Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-2-15,2,glm-5.3,"Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-2-16,2,glm-5.3-flash,"Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-2-17,2,kimi-k3,"Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 2. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-3-0,3,gpt-5.5,"Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-3-1,3,gpt-5.6-luna,"Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-3-2,3,gpt-5.6-sol,"Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-3-3,3,gpt-5.6-terra,"Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-3-4,3,gpt-6-astra,"Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-3-5,3,gemini-3.1-pro-preview,"Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-3-6,3,gemini-3.6-flash,"Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-3-7,3,gemini-3.7-flash,"Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-3-8,3,gemini-3.8-flash,"Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-3-9,3,claude-fable-5,"Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-3-10,3,claude-opus-4-6,"Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-3-11,3,claude-opus-4-8,"Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-3-12,3,claude-opus-5,"Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-3-13,3,claude-sonnet-5,"Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-3-14,3,qwen3.8-max,"Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-3-15,3,glm-5.3,"Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-3-16,3,glm-5.3-flash,"Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-3-17,3,kimi-k3,"Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 3. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-4-0,4,gpt-5.5,"Synthetic topic 4. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-4-1,4,gpt-5.6-luna,"Synthetic topic 4. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-4-2,4,gpt-5.6-sol,"Synthetic topic 4. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-4-3,4,gpt-5.6-terra,"Synthetic topic 4. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-4-4,4,gpt-6-astra,"Synthetic topic 4. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-4-5,4,gemini-3.1-pro-preview,"Synthetic topic 4. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-4-6,4,gemini-3.6-flash,"Synthetic topic 4. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-4-7,4,gemini-3.7-flash,"Synthetic topic 4. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-4-8,4,gemini-3.8-flash,"Synthetic topic 4. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-4-9,4,claude-fable-5,"Synthetic topic 4. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-4-10,4,claude-opus-4-6,"Synthetic topic 4. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-4-11,4,claude-opus-4-8,"Synthetic topic 4. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-4-12,4,claude-opus-5,"Synthetic topic 4. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-4-13,4,claude-sonnet-5,"Synthetic topic 4. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-4-14,4,qwen3.8-max,"Synthetic topic 4. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-4-15,4,glm-5.3,"Synthetic topic 4. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-4-16,4,glm-5.3-flash,"Synthetic topic 4. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-4-17,4,kimi-k3,"Synthetic topic 4. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 4. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-5-0,5,gpt-5.5,"Synthetic topic 5. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-5-1,5,gpt-5.6-luna,"Synthetic topic 5. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-5-2,5,gpt-5.6-sol,"Synthetic topic 5. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-5-3,5,gpt-5.6-terra,"Synthetic topic 5. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-5-4,5,gpt-6-astra,"Synthetic topic 5. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-5-5,5,gemini-3.1-pro-preview,"Synthetic topic 5. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-5-6,5,gemini-3.6-flash,"Synthetic topic 5. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-5-7,5,gemini-3.7-flash,"Synthetic topic 5. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-5-8,5,gemini-3.8-flash,"Synthetic topic 5. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-5-9,5,claude-fable-5,"Synthetic topic 5. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-5-10,5,claude-opus-4-6,"Synthetic topic 5. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-5-11,5,claude-opus-4-8,"Synthetic topic 5. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-5-12,5,claude-opus-5,"Synthetic topic 5. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-5-13,5,claude-sonnet-5,"Synthetic topic 5. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-5-14,5,qwen3.8-max,"Synthetic topic 5. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-5-15,5,glm-5.3,"Synthetic topic 5. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-5-16,5,glm-5.3-flash,"Synthetic topic 5. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-5-17,5,kimi-k3,"Synthetic topic 5. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 5. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-6-0,6,gpt-5.5,"Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-6-1,6,gpt-5.6-luna,"Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-6-2,6,gpt-5.6-sol,"Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-6-3,6,gpt-5.6-terra,"Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-6-4,6,gpt-6-astra,"Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-6-5,6,gemini-3.1-pro-preview,"Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-6-6,6,gemini-3.6-flash,"Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-6-7,6,gemini-3.7-flash,"Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-6-8,6,gemini-3.8-flash,"Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-6-9,6,claude-fable-5,"Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-6-10,6,claude-opus-4-6,"Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-6-11,6,claude-opus-4-8,"Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-6-12,6,claude-opus-5,"Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-6-13,6,claude-sonnet-5,"Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-6-14,6,qwen3.8-max,"Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-6-15,6,glm-5.3,"Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-6-16,6,glm-5.3-flash,"Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-6-17,6,kimi-k3,"Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 6. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-7-0,7,gpt-5.5,"Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-7-1,7,gpt-5.6-luna,"Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-7-2,7,gpt-5.6-sol,"Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-7-3,7,gpt-5.6-terra,"Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-7-4,7,gpt-6-astra,"Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-7-5,7,gemini-3.1-pro-preview,"Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-7-6,7,gemini-3.6-flash,"Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-7-7,7,gemini-3.7-flash,"Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-7-8,7,gemini-3.8-flash,"Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-7-9,7,claude-fable-5,"Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-7-10,7,claude-opus-4-6,"Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-7-11,7,claude-opus-4-8,"Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-7-12,7,claude-opus-5,"Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-7-13,7,claude-sonnet-5,"Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-7-14,7,qwen3.8-max,"Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-7-15,7,glm-5.3,"Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-7-16,7,glm-5.3-flash,"Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-7-17,7,kimi-k3,"Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 7. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-8-0,8,gpt-5.5,"Synthetic topic 8. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-8-1,8,gpt-5.6-luna,"Synthetic topic 8. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-8-2,8,gpt-5.6-sol,"Synthetic topic 8. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-8-3,8,gpt-5.6-terra,"Synthetic topic 8. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-8-4,8,gpt-6-astra,"Synthetic topic 8. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-8-5,8,gemini-3.1-pro-preview,"Synthetic topic 8. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-8-6,8,gemini-3.6-flash,"Synthetic topic 8. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-8-7,8,gemini-3.7-flash,"Synthetic topic 8. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-8-8,8,gemini-3.8-flash,"Synthetic topic 8. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-8-9,8,claude-fable-5,"Synthetic topic 8. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-8-10,8,claude-opus-4-6,"Synthetic topic 8. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-8-11,8,claude-opus-4-8,"Synthetic topic 8. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-8-12,8,claude-opus-5,"Synthetic topic 8. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-8-13,8,claude-sonnet-5,"Synthetic topic 8. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-8-14,8,qwen3.8-max,"Synthetic topic 8. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-8-15,8,glm-5.3,"Synthetic topic 8. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-8-16,8,glm-5.3-flash,"Synthetic topic 8. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-8-17,8,kimi-k3,"Synthetic topic 8. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 8. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-9-0,9,gpt-5.5,"Synthetic topic 9. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-9-1,9,gpt-5.6-luna,"Synthetic topic 9. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-9-2,9,gpt-5.6-sol,"Synthetic topic 9. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-9-3,9,gpt-5.6-terra,"Synthetic topic 9. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-9-4,9,gpt-6-astra,"Synthetic topic 9. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-9-5,9,gemini-3.1-pro-preview,"Synthetic topic 9. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-9-6,9,gemini-3.6-flash,"Synthetic topic 9. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-9-7,9,gemini-3.7-flash,"Synthetic topic 9. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-9-8,9,gemini-3.8-flash,"Synthetic topic 9. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-9-9,9,claude-fable-5,"Synthetic topic 9. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-9-10,9,claude-opus-4-6,"Synthetic topic 9. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-9-11,9,claude-opus-4-8,"Synthetic topic 9. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-9-12,9,claude-opus-5,"Synthetic topic 9. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-9-13,9,claude-sonnet-5,"Synthetic topic 9. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-9-14,9,qwen3.8-max,"Synthetic topic 9. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-9-15,9,glm-5.3,"Synthetic topic 9. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-9-16,9,glm-5.3-flash,"Synthetic topic 9. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-9-17,9,kimi-k3,"Synthetic topic 9. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 9. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-10-0,10,gpt-5.5,"Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-10-1,10,gpt-5.6-luna,"Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-10-2,10,gpt-5.6-sol,"Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-10-3,10,gpt-5.6-terra,"Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-10-4,10,gpt-6-astra,"Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-10-5,10,gemini-3.1-pro-preview,"Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-10-6,10,gemini-3.6-flash,"Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-10-7,10,gemini-3.7-flash,"Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-10-8,10,gemini-3.8-flash,"Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-10-9,10,claude-fable-5,"Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-10-10,10,claude-opus-4-6,"Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-10-11,10,claude-opus-4-8,"Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-10-12,10,claude-opus-5,"Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-10-13,10,claude-sonnet-5,"Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-10-14,10,qwen3.8-max,"Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-10-15,10,glm-5.3,"Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-10-16,10,glm-5.3-flash,"Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-10-17,10,kimi-k3,"Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 10. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-11-0,11,gpt-5.5,"Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-11-1,11,gpt-5.6-luna,"Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-11-2,11,gpt-5.6-sol,"Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-11-3,11,gpt-5.6-terra,"Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-11-4,11,gpt-6-astra,"Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-11-5,11,gemini-3.1-pro-preview,"Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-11-6,11,gemini-3.6-flash,"Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-11-7,11,gemini-3.7-flash,"Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-11-8,11,gemini-3.8-flash,"Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-11-9,11,claude-fable-5,"Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-11-10,11,claude-opus-4-6,"Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-11-11,11,claude-opus-4-8,"Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-11-12,11,claude-opus-5,"Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-11-13,11,claude-sonnet-5,"Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-11-14,11,qwen3.8-max,"Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-11-15,11,glm-5.3,"Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-11-16,11,glm-5.3-flash,"Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-11-17,11,kimi-k3,"Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 11. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-12-0,12,gpt-5.5,"Synthetic topic 12. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-12-1,12,gpt-5.6-luna,"Synthetic topic 12. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-12-2,12,gpt-5.6-sol,"Synthetic topic 12. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-12-3,12,gpt-5.6-terra,"Synthetic topic 12. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-12-4,12,gpt-6-astra,"Synthetic topic 12. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-12-5,12,gemini-3.1-pro-preview,"Synthetic topic 12. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-12-6,12,gemini-3.6-flash,"Synthetic topic 12. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-12-7,12,gemini-3.7-flash,"Synthetic topic 12. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-12-8,12,gemini-3.8-flash,"Synthetic topic 12. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-12-9,12,claude-fable-5,"Synthetic topic 12. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-12-10,12,claude-opus-4-6,"Synthetic topic 12. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-12-11,12,claude-opus-4-8,"Synthetic topic 12. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-12-12,12,claude-opus-5,"Synthetic topic 12. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-12-13,12,claude-sonnet-5,"Synthetic topic 12. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-12-14,12,qwen3.8-max,"Synthetic topic 12. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-12-15,12,glm-5.3,"Synthetic topic 12. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-12-16,12,glm-5.3-flash,"Synthetic topic 12. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-12-17,12,kimi-k3,"Synthetic topic 12. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 12. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-13-0,13,gpt-5.5,"Synthetic topic 13. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-13-1,13,gpt-5.6-luna,"Synthetic topic 13. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-13-2,13,gpt-5.6-sol,"Synthetic topic 13. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-13-3,13,gpt-5.6-terra,"Synthetic topic 13. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-13-4,13,gpt-6-astra,"Synthetic topic 13. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-13-5,13,gemini-3.1-pro-preview,"Synthetic topic 13. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-13-6,13,gemini-3.6-flash,"Synthetic topic 13. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-13-7,13,gemini-3.7-flash,"Synthetic topic 13. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-13-8,13,gemini-3.8-flash,"Synthetic topic 13. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-13-9,13,claude-fable-5,"Synthetic topic 13. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-13-10,13,claude-opus-4-6,"Synthetic topic 13. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-13-11,13,claude-opus-4-8,"Synthetic topic 13. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-13-12,13,claude-opus-5,"Synthetic topic 13. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-13-13,13,claude-sonnet-5,"Synthetic topic 13. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-13-14,13,qwen3.8-max,"Synthetic topic 13. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-13-15,13,glm-5.3,"Synthetic topic 13. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-13-16,13,glm-5.3-flash,"Synthetic topic 13. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-13-17,13,kimi-k3,"Synthetic topic 13. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 13. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"
+synthetic-14-0,14,gpt-5.5,"Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker0 uses signature0; This fixture checks code and has no scientific value.
+"
+synthetic-14-1,14,gpt-5.6-luna,"Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker1 uses signature1; This fixture checks code and has no scientific value.
+"
+synthetic-14-2,14,gpt-5.6-sol,"Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker2 uses signature2; This fixture checks code and has no scientific value.
+"
+synthetic-14-3,14,gpt-5.6-terra,"Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker3 uses signature3; This fixture checks code and has no scientific value.
+"
+synthetic-14-4,14,gpt-6-astra,"Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker4 uses signature4; This fixture checks code and has no scientific value.
+"
+synthetic-14-5,14,gemini-3.1-pro-preview,"Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker5 uses signature5; This fixture checks code and has no scientific value.
+"
+synthetic-14-6,14,gemini-3.6-flash,"Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker6 uses signature6; This fixture checks code and has no scientific value.
+"
+synthetic-14-7,14,gemini-3.7-flash,"Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker7 uses signature7; This fixture checks code and has no scientific value.
+"
+synthetic-14-8,14,gemini-3.8-flash,"Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker8 uses signature8; This fixture checks code and has no scientific value.
+"
+synthetic-14-9,14,claude-fable-5,"Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker9 uses signature9; This fixture checks code and has no scientific value.
+"
+synthetic-14-10,14,claude-opus-4-6,"Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker10 uses signature10; This fixture checks code and has no scientific value.
+"
+synthetic-14-11,14,claude-opus-4-8,"Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker11 uses signature11; This fixture checks code and has no scientific value.
+"
+synthetic-14-12,14,claude-opus-5,"Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker12 uses signature12; This fixture checks code and has no scientific value.
+"
+synthetic-14-13,14,claude-sonnet-5,"Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker13 uses signature13; This fixture checks code and has no scientific value.
+"
+synthetic-14-14,14,qwen3.8-max,"Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker14 uses signature14; This fixture checks code and has no scientific value.
+"
+synthetic-14-15,14,glm-5.3,"Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker15 uses signature15; This fixture checks code and has no scientific value.
+"
+synthetic-14-16,14,glm-5.3-flash,"Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker16 uses signature16; This fixture checks code and has no scientific value.
+"
+synthetic-14-17,14,kimi-k3,"Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+Synthetic topic 14. Author marker17 uses signature17; This fixture checks code and has no scientific value.
+"

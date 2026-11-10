@@ -1,0 +1,67 @@
+{
+  "created_date": "2026-10-15",
+  "distribution_scope": "external_only",
+  "public_file_formats": [
+    "parquet"
+  ],
+  "competition_data_files_included": false,
+  "manifest_scope": "All stable data and metadata assets. README.txt and dataset-metadata.json are maintained separately; manifest.json is not self-hashed.",
+  "documentation_files_not_hashed": [
+    "README.txt",
+    "dataset-metadata.json"
+  ],
+  "files": {
+    "data_dictionary.json": {
+      "bytes": 3182,
+      "sha256": "2faffbc7f2485fa20a3dcce6ae52ff9c12d1c3d99df644cf196c79dab8ddd60d"
+    },
+    "external_all_wide.parquet": {
+      "bytes": 226390430,
+      "sha256": "a33de9c348a945ea1be2a81becba8232c2b8bcc3456642407f55b6a2985c98b8"
+    },
+    "external_cell_metadata.parquet": {
+      "bytes": 17850728,
+      "sha256": "397af75e5f2809107d0758a147646a68a0132479a6ea77432d86243e92ad9079"
+    },
+    "external_cell_provenance.parquet": {
+      "bytes": 40625399,
+      "sha256": "906345a4d1f418da63267bf686e1e6847c09f347ecf9eb939860d9aae32abdd6"
+    },
+    "external_response_metadata.parquet": {
+      "bytes": 30680778,
+      "sha256": "8b16655dbb2b2849004fe57056668d8ddb8f0abbfac883d3dc81f0d375e5eaf9"
+    },
+    "external_row_metadata.parquet": {
+      "bytes": 4593634,
+      "sha256": "e2ee04939c33afecb9a5d8cbf25daca4e9bed9df354873c6ad054760cc6ce5d6"
+    },
+    "external_short_wide.parquet": {
+      "bytes": 14149789,
+      "sha256": "15a67d022315b2508af8edd749a7c041d42cc37e266106028c73e405659c400f"
+    },
+    "quarantine_luna_author_asserted_wide.parquet": {
+      "bytes": 29137730,
+      "sha256": "eb4639f796261e09736780d5b51fb7c2eca54088a4c2da71df10bb0bf0133ee0"
+    },
+    "quarantine_luna_cell_metadata.parquet": {
+      "bytes": 18013874,
+      "sha256": "1e38484f561c34e4ae1600217f182f58f4e6d87681561c8c0f94319cbace7387"
+    },
+    "quarantine_luna_cell_provenance.parquet": {
+      "bytes": 10692115,
+      "sha256": "c0feb20315d6a7075c1e4f4e809bea531e51b1347fb9ba6233100b66ea6c3b41"
+    },
+    "quarantine_luna_row_metadata.parquet": {
+      "bytes": 4887704,
+      "sha256": "a351c436d3c3bf080c54105f0a6b12b78947e4f65a2bf57a60a0231252c1365c"
+    },
+    "source_catalog.csv": {
+      "bytes": 7151,
+      "sha256": "c1033245fa80f8c0ca01104c8aeb2a76be0b823aec111f0c77d04345faec53d3"
+    },
+    "validation.json": {
+      "bytes": 5619,
+      "sha256": "fd0fbb3307a12fe47852e84086275f74a82744776bcc5912f0c219b1820da17e"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "wide_columns": {
+    "id": "Stable row ID. External display ranks are independent between all and short views.",
+    "prompt": "Exact source user prompt where available. Unverified external text may be shown, but its prompt group remains isolated.",
+    "model_columns": [
+      "claude-fable-5",
+      "claude-opus-4-6",
+      "claude-opus-4-8",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "gemini-3.1-pro-preview",
+      "gemini-3.6-flash",
+      "gemini-3.7-flash",
+      "gemini-3.8-flash",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "gpt-5.5",
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-6-astra",
+      "kimi-k3",
+      "qwen3.8-max"
+    ],
+    "answer_cells": "A single plain string answer or null; no arrays, no concatenation. Existing canonical answer text is preserved exactly."
+  },
+  "grouping": "Only byte-exact, nonempty, verified user prompt text is grouped across occurrences. Different contexts, images, temperatures, providers and system instructions may still share a user prompt. Display row ranks never imply matched runs or equivalent full contexts.",
+  "repeated_answers": "Distinct response IDs per prompt/model are sorted by response_id and assigned rank starting at zero. Repeated source occurrences of the same response stay in provenance. Short view reranks independently.",
+  "external_cell_metadata.parquet": "One record per occupied cell and view. Join on view,id,model. response_id links canonical response metadata; cell_id links occurrence provenance.",
+  "external_row_metadata.parquet": "One record per row and view: prompt_group_id,prompt_exact,replicate_index,model_count.",
+  "external_cell_provenance.parquet": "Every external provenance occurrence, unchanged metadata plus occurrence_id,prompt_group_id,grouping_is_exact_user_prompt,row_id_all,cell_id_all,row_id_short,cell_id_short. Short IDs are null for excluded responses.",
+  "external_response_metadata.parquet": "Canonical response-level metadata from the input, excluding only answer text. Some fields describe its canonical occurrence; occurrence-specific evidence is in external_cell_provenance.",
+  "quarantine_luna": "Separate author-asserted model corpus. Last transcript item may be tool output, not a standalone user prompt; every occurrence is isolated. Not merged into the main external views. Parquet only: three prompt strings contain embedded NUL bytes, preserved losslessly.",
+  "short_filter": "Uses the already-curated short_answer_candidate flag, including length 40–250 whitespace words and existing mechanical quality flags. It is not a license or semantic-quality guarantee.",
+  "splitting": "For model evaluation group by prompt_group_id, not row id; also prevent identical response_id and related trajectories from crossing train/validation folds.",
+  "nulls": "Parquet preserves nulls and literal strings such as NA. A null model cell means no answer is available.",
+  "distribution_scope": "External responses and separate Luna quarantine only. Competition train, test, sample submission, original wide tables and original cell metadata are not distributed.",
+  "public_file_formats": [
+    "parquet"
+  ]
+}

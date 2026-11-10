@@ -1,0 +1,1 @@
+Integration fixture only. Scores do not estimate competition performance.

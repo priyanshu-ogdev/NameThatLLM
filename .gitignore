@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary / Scratch files
+*.tmp
+*.tmp.*
+.tmp*
+*.log
+data/sample/working/
+working/
+kaggle_notebook_page.html
+kaggle_kernel_api.json
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE / Editor configuration
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db

@@ -143,6 +143,8 @@ from torch.optim import AdamW
 if torch.cuda.is_available():
     torch.backends.cudnn.benchmark = True
     try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
         torch.set_float32_matmul_precision("high")
     except Exception:
         pass
@@ -539,21 +541,17 @@ def compute_same_prompt_sibling_repulsion(
     """
     Penalizes representations of responses to the SAME prompt that collapse together
     despite originating from DIFFERENT model generators (author style separation).
-    Runs 100% vectorized in PyTorch without CUDA synchronizations.
+    Runs 100% vectorized in PyTorch without CPU-GPU synchronization stalls.
     """
     B = representations.size(0)
     if B <= 1 or batch_groups is None:
-        return torch.tensor(0.0, device=representations.device, dtype=representations.dtype)
+        return torch.zeros((), device=representations.device, dtype=representations.dtype)
 
     same_prompt = (batch_groups.unsqueeze(1) == batch_groups.unsqueeze(0))
     diff_model = (batch_labels.unsqueeze(1) != batch_labels.unsqueeze(0))
-    upper_tri = torch.triu(torch.ones(B, B, device=representations.device, dtype=torch.bool), diagonal=1)
-    pair_mask = same_prompt & diff_model & upper_tri
+    pair_mask = torch.triu(same_prompt & diff_model, diagonal=1)
 
     n_pairs = pair_mask.sum()
-    if n_pairs == 0:
-        return torch.tensor(0.0, device=representations.device, dtype=representations.dtype)
-
     f_norm = F.normalize(representations.float(), p=2, dim=-1)
     cos_sim = torch.mm(f_norm, f_norm.t())
     viol = torch.clamp(cos_sim - margin, min=0.0)
@@ -634,10 +632,8 @@ class TopicBlindAndSiFTPrep:
         valid_range = (input_ids >= 0) & (input_ids < max_lut)
         clamped = input_ids.clamp(0, max_lut - 1)
         is_topic = valid_range & self.is_topic_lut[clamped]
-        rand_mask = (torch.rand_like(input_ids, dtype=torch.float32) < self.mask_prob) & is_topic
-        masked_ids = input_ids.clone()
-        masked_ids[rand_mask] = self.mask_token_id
-        return masked_ids
+        rand_mask = (torch.rand(input_ids.shape, device=input_ids.device) < self.mask_prob) & is_topic
+        return input_ids.clone().masked_fill_(rand_mask, self.mask_token_id)
 
     def apply_sift_embedding_noise(self, inputs_embeds: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         if self.sift_eps <= 0.0:
@@ -697,13 +693,13 @@ class FastBatchPrefetcher:
                 kw = {}
                 for k, v in padded.items():
                     kw[k] = v.pin_memory() if self.cuda_ok else v
-                labels = torch.tensor(self.y_labels[idx], dtype=torch.long)
+                labels = torch.from_numpy(np.asarray(self.y_labels[idx], dtype=np.int64))
                 if self.cuda_ok:
                     labels = labels.pin_memory()
 
                 groups = None
                 if self.group_ids is not None:
-                    groups = torch.tensor(self.group_ids[idx], dtype=torch.long)
+                    groups = torch.from_numpy(np.asarray(self.group_ids[idx], dtype=np.int64))
                     if self.cuda_ok:
                         groups = groups.pin_memory()
 
@@ -1746,8 +1742,8 @@ class FocalLoss(nn.Module):
         logits_f = logits.float()
         if self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
             sm = self.sibling_margins.to(logits.device)
-            one_hot = F.one_hot(targets, num_classes=num_classes).type_as(logits_f)
-            logits_f = logits_f - one_hot * sm.unsqueeze(0)
+            target_margins = sm[targets].unsqueeze(1)
+            logits_f = logits_f.scatter_add(1, targets.unsqueeze(1), -target_margins)
         log_prob = torch.nn.functional.log_softmax(logits_f, dim=-1)
         log_p_t = log_prob.gather(1, targets.unsqueeze(1)).squeeze(1)
         p_t = torch.exp(log_p_t)
@@ -1928,27 +1924,27 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
         cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
         pooler = get_model_pooler(model)
         with inference_context():
-            for start in range(0, n_samples, eval_bs):
-                end = min(start + eval_bs, n_samples)
-                batch_indices = sort_idx[start:end]
-                sl = {
-                    "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                    "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                }
-                if "token_type_ids" in enc:
-                    sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
-                padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                kw = {
-                    "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
-                    "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
-                }
-                if "token_type_ids" in padded:
-                    kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
-                with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+                for start in range(0, n_samples, eval_bs):
+                    end = min(start + eval_bs, n_samples)
+                    batch_indices = sort_idx[start:end]
+                    sl = {
+                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                    }
+                    if "token_type_ids" in enc:
+                        sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                    kw = {
+                        "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
+                        "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
+                    }
+                    if "token_type_ids" in padded:
+                        kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
                     with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
                         set_model_pooler_mask(model, kw["attention_mask"])
                         logits = model(**kw).logits
-                all_logits.append(logits.float().cpu().numpy())
+                    all_logits.append(logits.float().cpu().numpy())
         set_model_pooler_mask(model, None)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
@@ -1979,7 +1975,8 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9), target_pooler
     """
     Lightweight forward-hook capture of intermediate decoder/encoder layers.
     If target_pooler is provided, injects the captured layers directly into the pooler
-    before it executes.
+    before it executes. Resets captured state at the earliest layer to support lifecycle
+    across multiple micro-batches without hook re-registration overhead.
     """
     base_m = getattr(model, "base_model", model)
     inner_m = getattr(base_m, "encoder", getattr(base_m, "deberta", getattr(base_m, "bert", getattr(base_m, "model", base_m))))
@@ -1990,16 +1987,20 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9), target_pooler
     handles = []
     if dec_layers is not None:
         n_dec = len(dec_layers)
-        for idx in layer_indices:
-            actual_idx = idx if idx >= 0 else n_dec + idx
+        actual_indices = [idx if idx >= 0 else n_dec + idx for idx in layer_indices]
+        valid_indices = [a for a in actual_indices if 0 <= a < n_dec]
+        min_idx = min(valid_indices) if valid_indices else None
+        for orig_idx, actual_idx in zip(layer_indices, actual_indices):
             if 0 <= actual_idx < n_dec:
-                def _make_hook(i):
+                def _make_hook(orig_i, act_i):
                     def _hook(m, inp, out):
-                        captured[i] = out[0] if isinstance(out, tuple) else out
+                        if act_i == min_idx:
+                            captured.clear()
+                        captured[orig_i] = out[0] if isinstance(out, tuple) else out
                         if target_pooler is not None and len(captured) == len(layer_indices):
                             target_pooler._extra_layers = [captured[x] for x in layer_indices]
                     return _hook
-                handles.append(dec_layers[actual_idx].register_forward_hook(_make_hook(idx)))
+                handles.append(dec_layers[actual_idx].register_forward_hook(_make_hook(orig_idx, actual_idx)))
     try:
         yield captured
     finally:
@@ -2025,20 +2026,20 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
         inf_bs = 16
         autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
         with inference_context():
-            for start in range(0, n_samples, inf_bs):
-                end = min(start + inf_bs, n_samples)
-                batch_indices = sort_idx[start:end]
-                sl = {
-                    "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                    "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                }
-                padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                batch_kwargs = {
-                    "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
-                    "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
-                }
-                with autocast_ctx:
-                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                for start in range(0, n_samples, inf_bs):
+                    end = min(start + inf_bs, n_samples)
+                    batch_indices = sort_idx[start:end]
+                    sl = {
+                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                    }
+                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                    batch_kwargs = {
+                        "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
+                        "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
+                    }
+                    with autocast_ctx:
                         out = backbone(**batch_kwargs, output_hidden_states=False)
                         if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
                             h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
@@ -2058,7 +2059,7 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
                                 pooled = last_h[batch_idx, seq_lens].float()
                             logits = head(pooled.to(head_dev)).float().cpu().numpy()
                         del h_input
-                all_logits.append(logits)
+                    all_logits.append(logits)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
         inv_idx[sort_idx] = np.arange(len(sort_idx))
@@ -2375,6 +2376,8 @@ def train_transformer_fold(
             print(f"  [{model_name}] Note: TopicBlind prep skipped ({e}).", flush=True)
             topic_prep = None
 
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+
     for epoch in range(epochs):
         model.train()
         if group_ids_tr is not None:
@@ -2397,17 +2400,17 @@ def train_transformer_fold(
         prefetcher = FastBatchPrefetcher(
             tokenizer, enc_tr, y_tr_int, epoch_indices, batch_size, dev, cuda_ok=cuda_ok, topic_prep=topic_prep, group_ids=group_ids_tr
         )
+        pooler_inst = get_model_pooler(model)
         try:
-            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
-                if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
-                    print(f"  [{model_name}] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
-                    stop_early = True
-                    break
+            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler_inst):
+                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+                    if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
+                        print(f"  [{model_name}] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
+                        stop_early = True
+                        break
 
-                try:
-                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
-                    pooler_inst = get_model_pooler(model)
-                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler_inst):
+                    try:
+                        batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
                         with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
                             set_model_pooler_mask(model, batch_kwargs["attention_mask"])
                             if topic_prep is not None and topic_prep.sift_eps > 0:
@@ -2429,7 +2432,6 @@ def train_transformer_fold(
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
                         aux_loss = family_criterion(fam_logits, batch_fam_labels)
                         loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
-                        batch_groups = getattr(prefetcher, "current_groups", None)
                         if batch_groups is not None:
                             repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
                             loss = loss + (0.04 * repulsion_loss) / grad_accum
@@ -2437,76 +2439,76 @@ def train_transformer_fold(
                         if branch_var is not None:
                             loss = loss + (0.03 * branch_var) / grad_accum
 
-                    if use_amp:
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
+                        if use_amp:
+                            scaler.scale(loss).backward()
+                        else:
+                            loss.backward()
 
-                    loss_val = loss.item() * grad_accum
-                    if math.isnan(loss_val) or math.isinf(loss_val):
-                        n_skipped_micros += 1
-                        print(f"  [{model_name}] Warning: NaN/Inf loss in micro-step {micro_step}. Skipping micro-batch ({n_skipped_micros} total skips).", flush=True)
-                        if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
-                            raise FloatingPointError(f"[{model_name}] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Unstable FP16 training detected; discarding fold.")
-                        if accumulated_steps > 0:
-                            optimizer.zero_grad(set_to_none=True)
-                            accumulated_steps = 0
+                        loss_val = loss.item() * grad_accum
+                        if math.isnan(loss_val) or math.isinf(loss_val):
+                            n_skipped_micros += 1
+                            print(f"  [{model_name}] Warning: NaN/Inf loss in micro-step {micro_step}. Skipping micro-batch ({n_skipped_micros} total skips).", flush=True)
+                            if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
+                                raise FloatingPointError(f"[{model_name}] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Unstable FP16 training detected; discarding fold.")
+                            if accumulated_steps > 0:
+                                optimizer.zero_grad(set_to_none=True)
+                                accumulated_steps = 0
+                            continue
+
+                    except torch.cuda.OutOfMemoryError:
+                        n_oom_skips += 1
+                        print(f"  [{model_name}] CUDA OOM detected at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
+                        if n_oom_skips > 5:
+                            raise RuntimeError(f"[{model_name}] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                        try:
+                            del logits, loss, batch_kwargs, batch_labels
+                        except Exception:
+                            pass
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
+                        if cuda_ok and str(dev).startswith("cuda"):
+                            dev_idx = torch.device(dev).index if torch.device(dev).index is not None else 0
+                            with torch.cuda.device(dev_idx):
+                                torch.cuda.synchronize(dev_idx)
+                                torch.cuda.empty_cache()
                         continue
 
-                except torch.cuda.OutOfMemoryError:
-                    n_oom_skips += 1
-                    print(f"  [{model_name}] CUDA OOM detected at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
-                    if n_oom_skips > 5:
-                        raise RuntimeError(f"[{model_name}] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
-                    try:
-                        del logits, loss, batch_kwargs, batch_labels
-                    except Exception:
-                        pass
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
-                    if cuda_ok and str(dev).startswith("cuda"):
-                        dev_idx = torch.device(dev).index if torch.device(dev).index is not None else 0
-                        with torch.cuda.device(dev_idx):
-                            torch.cuda.synchronize(dev_idx)
-                            torch.cuda.empty_cache()
-                    continue
+                    running_loss += loss_val
+                    n_micro += 1
+                    n_total_micros_executed += 1
+                    accumulated_steps += 1
 
-                running_loss += loss_val
-                n_micro += 1
-                n_total_micros_executed += 1
-                accumulated_steps += 1
-
-                if accumulated_steps == grad_accum:
-                    if use_amp:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                        old_scale = scaler.get_scale()
-                        scaler.step(optimizer)
-                        scaler.update()
-                        if scaler.get_scale() >= old_scale:
+                    if accumulated_steps == grad_accum:
+                        if use_amp:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+                            old_scale = scaler.get_scale()
+                            scaler.step(optimizer)
+                            scaler.update()
+                            if scaler.get_scale() >= old_scale:
+                                scheduler.step()
+                        else:
+                            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+                            optimizer.step()
                             scheduler.step()
-                    else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                        optimizer.step()
-                        scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
 
-                if micro_step == 0 and epoch == 0:
-                    t_step1_done = time.perf_counter()
-                    first_step_overhead = t_step1_done - t_batch_start
+                    if micro_step == 0 and epoch == 0:
+                        t_step1_done = time.perf_counter()
+                        first_step_overhead = t_step1_done - t_batch_start
 
-                log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
-                if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
-                    if t_step1_done is not None and micro_step > 0:
-                        step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                        step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
-                    else:
-                        step_elapsed = max(time.perf_counter() - t_batch_start, 0.001)
-                        step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
-                    step_loss = running_loss / max(n_micro, 1)
-                    pct = ((micro_step + 1) / n_total_micros) * 100.0
-                    print(f"  [{model_name}] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status(dev)}", flush=True)
+                    log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
+                    if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
+                        if t_step1_done is not None and micro_step > 0:
+                            step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
+                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                        else:
+                            step_elapsed = max(time.perf_counter() - t_batch_start, 0.001)
+                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                        step_loss = running_loss / max(n_micro, 1)
+                        pct = ((micro_step + 1) / n_total_micros) * 100.0
+                        print(f"  [{model_name}] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status(dev)}", flush=True)
         finally:
             prefetcher.close()
 
@@ -2871,17 +2873,17 @@ def train_qwen_lora_fold(
             dev=first_dev, label_dev=head_dev, cuda_ok=cuda_ok, group_ids=group_ids_tr
         )
         try:
-            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
-                if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
-                    print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
-                    stop_early = True
-                    break
+            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+                    if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
+                        print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
+                        stop_early = True
+                        break
 
-                try:
-                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
-                    autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-                    with autocast_ctx:
-                        with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                    try:
+                        batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                        autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
+                        with autocast_ctx:
                             out = backbone(**batch_kwargs, output_hidden_states=False)
                             if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
                                 h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
@@ -2901,26 +2903,25 @@ def train_qwen_lora_fold(
                                     pooled = last_h[batch_idx, seq_lens].float()
                                 logits = head(pooled.to(head_dev))
                             del h_input
-                    logits_f = logits.float()
-                    main_loss = criterion(logits_f, batch_labels)
-                    fam_logits = compute_family_logits(logits_f, temp=4.0)
-                    batch_fam_labels = label_to_fam_tensor[batch_labels]
-                    aux_loss = family_criterion(fam_logits, batch_fam_labels)
-                    loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
-                    batch_groups = getattr(prefetcher, "current_groups", None)
-                    if batch_groups is not None:
-                        repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
-                        loss = loss + (0.04 * repulsion_loss) / grad_accum
+                        logits_f = logits.float()
+                        main_loss = criterion(logits_f, batch_labels)
+                        fam_logits = compute_family_logits(logits_f, temp=4.0)
+                        batch_fam_labels = label_to_fam_tensor[batch_labels]
+                        aux_loss = family_criterion(fam_logits, batch_fam_labels)
+                        loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
+                        if batch_groups is not None:
+                            repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
+                            loss = loss + (0.04 * repulsion_loss) / grad_accum
 
-                    if cuda_ok:
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
+                        if cuda_ok:
+                            scaler.scale(loss).backward()
+                        else:
+                            loss.backward()
 
-                    loss_val = loss.item() * grad_accum
-                    if math.isnan(loss_val) or math.isinf(loss_val):
-                        n_skipped_micros += 1
-                        print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
+                        loss_val = loss.item() * grad_accum
+                        if math.isnan(loss_val) or math.isinf(loss_val):
+                            n_skipped_micros += 1
+                            print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
                         if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
                             raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
                         if accumulated_steps > 0:
@@ -2928,62 +2929,62 @@ def train_qwen_lora_fold(
                             accumulated_steps = 0
                         continue
 
-                except torch.cuda.OutOfMemoryError:
-                    n_oom_skips += 1
-                    print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
-                    if n_oom_skips > 5:
-                        raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
-                    try:
-                        del logits, loss, batch_kwargs, batch_labels
-                    except Exception:
-                        pass
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
-                    if cuda_ok:
-                        for gi in (first_dev, head_dev):
-                            if str(gi).startswith("cuda"):
-                                dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
-                                with torch.cuda.device(dev_idx):
-                                    torch.cuda.synchronize(dev_idx)
-                                    torch.cuda.empty_cache()
-                    continue
+                    except torch.cuda.OutOfMemoryError:
+                        n_oom_skips += 1
+                        print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
+                        if n_oom_skips > 5:
+                            raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                        try:
+                            del logits, loss, batch_kwargs, batch_labels
+                        except Exception:
+                            pass
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
+                        if cuda_ok:
+                            for gi in (first_dev, head_dev):
+                                if str(gi).startswith("cuda"):
+                                    dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
+                                    with torch.cuda.device(dev_idx):
+                                        torch.cuda.synchronize(dev_idx)
+                                        torch.cuda.empty_cache()
+                        continue
 
-                epoch_loss += loss_val
-                n_batches += 1
-                n_total_micros_executed += 1
-                accumulated_steps += 1
+                    epoch_loss += loss_val
+                    n_batches += 1
+                    n_total_micros_executed += 1
+                    accumulated_steps += 1
 
-                if accumulated_steps == grad_accum:
-                    if cuda_ok:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
-                        old_scale = scaler.get_scale()
-                        scaler.step(optimizer)
-                        scaler.update()
-                        if scaler.get_scale() >= old_scale:
+                    if accumulated_steps == grad_accum:
+                        if cuda_ok:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                            old_scale = scaler.get_scale()
+                            scaler.step(optimizer)
+                            scaler.update()
+                            if scaler.get_scale() >= old_scale:
+                                scheduler.step()
+                        else:
+                            torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                            optimizer.step()
                             scheduler.step()
-                    else:
-                        torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
-                        optimizer.step()
-                        scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
 
-                if micro_step == 0 and epoch == 0:
-                    t_step1_done = time.perf_counter()
-                    first_step_overhead = t_step1_done - t_qwen_ep_start
+                    if micro_step == 0 and epoch == 0:
+                        t_step1_done = time.perf_counter()
+                        first_step_overhead = t_step1_done - t_qwen_ep_start
 
-                log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
-                if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
-                    if t_step1_done is not None and micro_step > 0:
-                        step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                        step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
-                    else:
-                        step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
-                        step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
-                    step_loss = epoch_loss / max(n_batches, 1)
-                    pct = ((micro_step + 1) / n_total_micros) * 100.0
-                    print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
+                    log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
+                    if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
+                        if t_step1_done is not None and micro_step > 0:
+                            step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
+                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                        else:
+                            step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
+                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                        step_loss = epoch_loss / max(n_batches, 1)
+                        pct = ((micro_step + 1) / n_total_micros) * 100.0
+                        print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
         finally:
             prefetcher.close()
 
@@ -3014,12 +3015,12 @@ def train_qwen_lora_fold(
         if val_score > best_val_score:
             best_val_score = val_score
             best_val_logits = val_logits
-            best_lora_state = {k: v.cpu().clone() for k, v in backbone.state_dict().items() if "lora_" in k}
+            best_lora_state = {k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k}
             best_head_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
 
         # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs
         if epoch >= max(epochs - 2, 1):
-            epoch_lora_states.append({k: v.cpu().clone() for k, v in backbone.state_dict().items() if "lora_" in k and v.is_floating_point()})
+            epoch_lora_states.append({k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k and v.is_floating_point()})
             epoch_head_states.append({k: v.cpu().clone() for k, v in head.state_dict().items() if v.is_floating_point()})
 
         if stop_early:

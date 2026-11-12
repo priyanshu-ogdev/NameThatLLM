@@ -20,7 +20,7 @@ Two validated submission approaches are provided:
 ├───────────────────────────────────────────────────────────────┤
 │ Route D: Frontier Quad-Model Production Pipeline (V6 Gold)    │
 │ • Notebook: notebooks/kaggle_tri_ensemble.ipynb / .py         │
-│ • Accelerator: Dual Tesla T4 (GPU T4 x2) | Runtime: ~7.2 hours │
+│ • Accelerator: Dual Tesla T4 (GPU T4 x2) | Runtime: ~4.9–5.8h  │
 │ • Inputs: DeBERTa-v3 + BGE-large + Qwen 3 8B / 2.5 + External │
 │ • Target Score: 0.780 – 0.805+ Macro Balanced Accuracy        │
 └───────────────────────────────────────────────────────────────┘
@@ -84,16 +84,16 @@ This approach extracts middle-layer representations from a frozen generative mod
 
 ## 4. Route D: Frontier Quad-Model Production Pipeline (V6 Gold Medal Target >0.78)
 
-This is the flagship production ensemble combining **DeBERTa-v3-large** (disentangled attention, GPU 0), **BGE-large-en-v1.5** (contrastive bi-encoder, GPU 1), **Qwen 3 8B / 2.5 7B LoRA** (generative causal LLM with Spike & Gap Hierarchical Head, sharded across dual GPUs), **CPU Multiview Dual-Linear** (~850k n-grams, 132 stylometrics, and Intra-Family Clique Specialists), and **24,025 Zero-VRAM external passages** (`external_short_wide.parquet`).
+This is the flagship production ensemble combining **DeBERTa-v3-large** (disentangled attention, GPU 0), **BGE-large-en-v1.5** (contrastive bi-encoder, GPU 1), **Qwen 3 8B / 2.5 7B LoRA** (generative causal LLM with Spike & Gap Hierarchical Head, sharded across dual GPUs), **CPU Multiview Dual-Linear** (~850k n-grams, 145 stylometrics expanded to 1,835 Poly-2/RBF dimensions, and Intra-Family Clique Specialists), and **24,025 Zero-VRAM external passages** (`external_short_wide.parquet`).
 
 ### Step-by-Step Instructions:
 
 #### 1. Pre-flight Smoke Test (Recommended First Step)
-Before committing the full 7-hour run, execute the pre-flight verifier to benchmark throughput and confirm hardware stability:
+Before committing the full 5.8-hour run, execute the pre-flight verifier to benchmark throughput and confirm hardware stability:
 1. Upload [`notebooks/kaggle_dry_run.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.ipynb) (or paste [`notebooks/kaggle_dry_run.py`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.py)) to a new Kaggle notebook.
 2. Select **Accelerator: GPU T4 x2**, **Internet: Off**.
 3. Attach the datasets listed below.
-4. Click **Run All**. The dry run executes 8 comprehensive pre-flight checks in **< 2 minutes**, printing the Wall-Clock Feasibility Matrix and Go/No-Go verdict.
+4. Click **Run All**. The dry run executes 9 comprehensive pre-flight checks in **< 2 minutes**, printing the Wall-Clock Feasibility Matrix and Go/No-Go verdict.
 
 #### 2. Full Production Run Setup
 1. On Kaggle, open the competition [Code tab](https://www.kaggle.com/competitions/name-that-llm/code) and select **New Notebook** (or upload [`notebooks/kaggle_tri_ensemble.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.ipynb)).
@@ -115,7 +115,7 @@ Before committing the full 7-hour run, execute the pre-flight verifier to benchm
 #### 3. Execution Pipeline Stages:
 When executed, the pipeline sequentially advances through 5 clean stages:
 - **STEP 0 (Multi-Model Upfront Pre-Tokenization & RAM Caching):** Precomputes token IDs, attention masks, and special `[NL]` structure across all models once in parallel (~28 MB host RAM, saving 100k+ tokenizations).
-- **STEP 1 (CPU Multiview & Immediate Baseline Submission):** Fits the FeatureUnion (~850k n-grams + 132 stylometrics) and writes a valid, non-empty `submission.parquet` within the first **30 seconds**.
+- **STEP 1 (CPU Multiview & Immediate Baseline Submission):** Fits the FeatureUnion (~850k n-grams + 145 stylometrics) and writes a valid, non-empty `submission.parquet` within the first **30 seconds**.
 - **STEP 2 (5-Fold Prompt-Grouped Cross-Validation):**
   - **Parallel GPU Execution:** DeBERTa (GPU 0) and BGE (GPU 1) train simultaneously via `ThreadPoolExecutor(max_workers=2)`.
   - **Qwen LoRA (Dual GPU):** Sharded across both GPUs (`device_map="auto"`), extracting multi-layer hidden states (-1, -5, -9) through the `SpikeAndGapHierarchicalHead`.
@@ -126,7 +126,7 @@ When executed, the pipeline sequentially advances through 5 clean stages:
 
 #### 4. Save and Submit:
 1. Click **Save Version** -> **Save & Run All (Commit)**.
-2. The notebook will run for approximately **6.8 to 7.4 hours** (well within Kaggle's 9.0-hour wall-clock limit, safeguarded by internal deadline timers).
+2. The notebook runs in approximately **4.92–5.78 hours** (295.2 min Dual-GPU concurrent / 346.8 min conservative upper bound with 2x TTA), leaving **+2.42h to +3.28h** below the 8.2-hour internal guard and **+3.22h to +4.08h** below Kaggle's 9.0-hour wall-clock timeout.
 3. Once completed, navigate to the notebook version, locate `submission.parquet`, and click **Submit to Competition**.
 
 ---

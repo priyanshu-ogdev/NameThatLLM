@@ -3,7 +3,6 @@ sys.path.insert(0, ".")
 
 import numpy as np
 import torch
-import torch.nn as nn
 from notebooks.kaggle_tri_ensemble import (
     SIBLING_DIFFICULTY_MARGINS,
     FocalLoss,

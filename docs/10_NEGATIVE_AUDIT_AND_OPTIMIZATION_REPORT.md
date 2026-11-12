@@ -30,7 +30,7 @@ This document compiles the complete forensic negative audit across the **Name Th
 ---
 
 ### 3. CPU Subblend Sparse Anchor & Tie-Break Degradation
-- **Failure Mode**: `optimize_cpu_subblend` searched $\alpha \in [0.5, 1.0]$ in ascending order with initial `best_score = -1.0`. When dense stylometrics (132 features) had neutral signal, the blend score was identical across all $\alpha$, causing $\alpha = 0.50$ to be selected simply because it was evaluated first.
+- **Failure Mode**: `optimize_cpu_subblend` searched $\alpha \in [0.5, 1.0]$ in ascending order with initial `best_score = -1.0`. When dense stylometrics (145 features) had neutral signal, the blend score was identical across all $\alpha$, causing $\alpha = 0.50$ to be selected simply because it was evaluated first.
 - **Impact**: The model arbitrarily discarded 50% of the predictive confidence of the 850k-feature sparse TF-IDF model, increasing prediction variance.
 - **Resolution**: Anchored baseline score at pure sparse ($\alpha = 1.0$) and searched in descending order (`0.95` down to `0.45`):
   ```python
@@ -390,19 +390,19 @@ While the class names match 18/18, forensic inspection of `external_short_wide.p
 ## 📈 Parity, Code Quality & Projected Trajectory
 
 ### Codebase Parity Metrics
-- **Shared Code Identity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact byte parity (**128,486 characters, 2,835 lines**).
-- **Ruff Linter**: 0 errors, 0 warnings across all production and test files.
+- **Shared Code Identity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact byte parity (**183,229 characters, 3,937 lines**).
+- **Ruff Linter**: 0 errors across production scripts, `src/ntl/`, and active test suites.
 - **Python AST Parse**: 100% valid syntax without deprecation warnings.
 - **Synchronized Notebooks**:
-   - `kaggle_dry_run.ipynb`: 3,195 lines
-   - `kaggle_tri_ensemble.ipynb`: 3,460 lines
+   - `kaggle_dry_run.ipynb`: 4,784 file lines (4,747 code lines)
+   - `kaggle_tri_ensemble.ipynb`: 4,742 file lines (4,705 code lines)
 
 ### Benchmark Trajectory
 
 | Model Component / Ensemble Stage | Projected Macro Balanced Accuracy | Status |
 |---|---|---|
 | Baseline Reference (Public Gold Medal) | 0.6540 | Reference Benchmark |
-| 1. CPU Multiview Dual-Linear (~850k + 132 stylometrics) | 0.4950 – 0.5120 | Step 0 (~30s) |
+| 1. CPU Multiview Dual-Linear (~850k + 145 stylometrics) | 0.4950 – 0.5120 | Step 0 (~30s) |
 | 2. BGE-large-en-v1.5 Full FT (Multi-Moment + LLRD $\xi=0.85$ + SiFT) | 0.6280 – 0.6420 | GPU 1 (Concurrent) |
 | 3. DeBERTa-v3-large Full FT (Multi-Moment + LLRD $\xi=0.90$ + SiFT) | 0.6450 – 0.6620 | GPU 0 (Concurrent) |
 | 4. Qwen 3 8B / 2.5 7B LoRA (Spike & Gap Head + Sub-Center $K=3$) | 0.6720 – 0.6900 | Dual GPU Sharded |

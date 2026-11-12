@@ -7,9 +7,9 @@ Target Metric: Macro Balanced Accuracy across 18 classes (>0.70+).
 
 Key Architectural Components:
   1. DeBERTa-v3-large Full FT -> cuda:0 (BS=16, Head+Tail L=448, LLRD xi=0.90, StylometricMultiMomentPooler)
-  2. BGE-large-en-v1.5 Full FT -> cuda:1 (BS=16, Head+Tail L=448, LLRD xi=0.85, Multi-Moment Pooling)
+  2. BGE-large-en-v1.5 Full FT -> cuda:1 (BS=20, Head+Tail L=448, LLRD xi=0.85, Multi-Moment Pooling)
   3. Qwen 3 8B / 2.5 7B LoRA  -> device_map="auto" sharded across dual GPUs (r=48, SpikeAndGapHierarchicalHead)
-  4. CPU Multiview Dual-Linear -> ~850k sparse TF-IDF + 132 stylometrics + IntraFamilyCliqueSpecialist
+  4. CPU Multiview Dual-Linear -> ~850k sparse TF-IDF + 145 stylometrics + IntraFamilyCliqueSpecialist
   5. Zero-VRAM External Data   -> 24k passages with Kish ESS-capped mass conservation (0.000% prior skew)
   6. Meta-Combiner & Consensus -> Nested 5-fold CV CPU autograd L-BFGS + Hierarchical Soft-Tree + Sinkhorn balancing
 """
@@ -107,13 +107,12 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
-from scipy.special import softmax, logsumexp  # noqa: F401
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, RidgeClassifier
 from sklearn.metrics import balanced_accuracy_score
-from sklearn.model_selection import StratifiedGroupKFold  # noqa: F401
+from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.kernel_approximation import Nystroem
@@ -830,10 +829,10 @@ def precompute_token_caches(raw_texts_tr, raw_texts_te, deberta_dir=None, bge_di
 
     return caches
 
-# --- 3. 132-DIMENSIONAL RICH STYLOMETRIC EXTRACTOR ---
+# --- 3. 145-DIMENSIONAL RICH STYLOMETRIC EXTRACTOR ---
 
 class RichStyleFeatures(BaseEstimator, TransformerMixin):
-    """Linguistic and typographical features (132 features) capturing authorial habits."""
+    """Linguistic and typographical features (145 features) capturing authorial habits."""
     PUNCTUATION = [
         "\u2014", "\u2013", "-", ",", ".", ";", ":", "!", "?", "\u2026", "...",
         '"', "'", "\u2018", "\u2019", "\u201c", "\u201d", "(", ")", "[", "]",
@@ -950,7 +949,7 @@ class RichStyleFeatures(BaseEstimator, TransformerMixin):
             rows.append(feat)
         return np.asarray(rows, dtype=np.float64)
 
-# --- 4. CPU MULTIVIEW DUAL-LINEAR PIPELINE (~850k TF-IDF + 132 Stylometrics) ---
+# --- 4. CPU MULTIVIEW DUAL-LINEAR PIPELINE (~850k TF-IDF + 145 Stylometrics) ---
 
 def align_margins(margins: np.ndarray, model_classes: list, canonical_labels: list, fill_value: float = -999.0) -> np.ndarray:
     """Reorder margin or probability columns to match canonical LABELS."""
@@ -986,7 +985,7 @@ class NonLinearStylometricKernelExpander(BaseEstimator, TransformerMixin):
       1. Internal unit-variance scaling clipped to [-6.0, 6.0] to prevent quadratic blowout.
       2. Degree-2 polynomial interaction cross-products among top-36 variance features (666 quad terms).
       3. Nyström RBF kernel approximation mapping to 1,024 non-linear components (gamma=1.0/n_feats).
-    Total expansion: 132 (raw scaled) + 666 (quad cross-products) + 1,024 (RBF components) = 1,822 features.
+    Total expansion: 145 (raw scaled) + 666 (quad cross-products) + 1,024 (RBF components) = 1,835 features.
     Utilizes ~3.2 GB of System RAM to grant CPU linear models (LogisticRegression / Ridge)
     expressive curved decision boundaries between LLM stylistic signatures in <3.0s per fold.
     """
@@ -1224,7 +1223,7 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
     """
     Discovers the Prompt-Topic Subspace vs. Author-Style Subspace using multi-model prompts,
     and attenuates topic-correlated directions so unseen test prompts cannot shift predictions.
-    Operates strictly on dense representations (e.g. 132-dim stylometrics, 18-dim OOF probabilities,
+    Operates strictly on dense representations (e.g. 145-dim stylometrics, 18-dim OOF probabilities,
     or neural latent embeddings) to prevent sparse matrix densification and memory explosion.
     Class-demeaned within-prompt SVD prevents partial prompts from leaking author style into the topic subspace.
     """
@@ -2171,8 +2170,6 @@ def train_transformer_fold(
     - Protected scheduler stepping with GradScaler scale checking (no PyTorch UserWarnings).
     - Per-device context cache clearing.
     """
-    from transformers import get_cosine_schedule_with_warmup
-
     label2id = {l: i for i, l in enumerate(labels)}
     texts_tr = list(texts_tr)
     texts_va = list(texts_va)
@@ -2709,8 +2706,6 @@ def train_qwen_lora_fold(
         print("  [Qwen LoRA] peft not installed -> skipping Qwen stream.", flush=True)
         return None, None
 
-    from transformers import AutoModel, AutoTokenizer, get_cosine_schedule_with_warmup
-
     label2id = {l: i for i, l in enumerate(labels)}
     texts_tr = list(texts_tr)
     texts_va = list(texts_va)
@@ -2851,6 +2846,7 @@ def train_qwen_lora_fold(
         if p.dtype != torch.float32:
             p.data = p.data.to(torch.float32)
     head_params = list(head.parameters())
+    all_trainable_params = lora_params + head_params
     head_decay = [p for p in head_params if p.ndim >= 2]
     head_no_decay = [p for p in head_params if p.ndim < 2]
     optimizer = AdamW(
@@ -3015,14 +3011,14 @@ def train_qwen_lora_fold(
                     if accumulated_steps == grad_accum:
                         if cuda_ok:
                             scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
                             old_scale = scaler.get_scale()
                             scaler.step(optimizer)
                             scaler.update()
                             if scaler.get_scale() >= old_scale:
                                 scheduler.step()
                         else:
-                            torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
                             optimizer.step()
                             scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
@@ -3051,14 +3047,14 @@ def train_qwen_lora_fold(
         if accumulated_steps > 0:
             if cuda_ok:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
                 old_scale = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
                 if scaler.get_scale() >= old_scale:
                     scheduler.step()
             else:
-                torch.nn.utils.clip_grad_norm_(lora_params + head_params, max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
                 optimizer.step()
                 scheduler.step()
             optimizer.zero_grad(set_to_none=True)
@@ -3221,22 +3217,6 @@ def margins_to_probs(margins: np.ndarray, temp: float = 1.0) -> np.ndarray:
     if np.any(bad):
         p[bad] = 1.0 / p.shape[1]
     return p
-
-
-def apply_hierarchical_family_gating(probs: np.ndarray, alpha: float = 0.35) -> np.ndarray:
-    """
-    Smooth family-level prior on probability simplex with cardinality normalization.
-    Normalizes by uniform family prior mass (|fam| / K) to eliminate structural bias
-    toward larger model families (e.g. OpenAI/Anthropic with 5 models vs Kimi with 1).
-    """
-    K = probs.shape[1]
-    gated = probs.copy()
-    for indices in FAMILY_TO_INDICES.values():
-        prior_mass = max(len(indices) / K, 1e-6)
-        fam_mass = np.sum(probs[:, indices], axis=1, keepdims=True)
-        concentration = np.maximum(fam_mass / prior_mass, 1e-6)
-        gated[:, indices] *= (concentration ** alpha)
-    return gated / np.maximum(np.sum(gated, axis=1, keepdims=True), 1e-12)
 
 
 def sinkhorn_knopp_balance(
@@ -3686,12 +3666,6 @@ class TransductivePromptCenterer:
         return best_eta
 
 
-def apply_transductive_prompt_centering(logits, X_sparse_raw, k_neighbors=17, sim_threshold=0.22, eta=0.18):
-    """Functional wrapper for backward-compatibility with tests."""
-    centerer = TransductivePromptCenterer(k_neighbors=k_neighbors, sim_threshold=sim_threshold).fit_graph(X_sparse_raw)
-    return centerer.transform(logits, eta=eta)
-
-
 class CPUGradientMetaCombiner:
     """
     PyTorch CPU Autograd L-BFGS Meta-Combiner.
@@ -3831,9 +3805,6 @@ class CPUGradientMetaCombiner:
         Averages parameter tensors across folds for bagged test inference (predict_proba).
         Returns (oof_cv_probs, oof_cv_score).
         """
-        from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
-        from sklearn.metrics import balanced_accuracy_score
-
         valid_indices = [i for i, l in enumerate(oof_logits_list) if l is not None]
         self.valid_indices = valid_indices
         self.M = len(valid_indices)
@@ -4124,7 +4095,6 @@ def run_dry_run_verifier():
     print("  StylometricMultiMomentPooler Multi-Layer Fusion (-1, -3, -6) & gradient backpropagation verified [OK]")
 
     if deberta_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         deb_smoke_kw = {}
         if "deberta" in smoke_caches:
             deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr"]
@@ -4141,7 +4111,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **deb_smoke_kw,
         )
-        deb_dur = time.perf_counter() - t0
         check_finite_logits(val_deb, "DeBERTa Val")
         check_finite_logits(test_deb, "DeBERTa Test")
         deb_sps = getattr(train_deberta_fold, "last_throughput", 20.0)
@@ -4176,7 +4145,6 @@ def run_dry_run_verifier():
     target_bge_dev = "cuda:1" if n_gpus >= 2 else ("cuda:0" if cuda_ok else "cpu")
     print(f"[Check 4/9] Testing BGE-large Mini-Training on GPU 1 ({target_bge_dev})...", flush=True)
     if bge_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         bge_smoke_kw = {}
         if "bge" in smoke_caches:
             bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr"]
@@ -4193,7 +4161,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **bge_smoke_kw,
         )
-        bge_dur = time.perf_counter() - t0
         check_finite_logits(val_bge, "BGE Val")
         check_finite_logits(test_bge, "BGE Test")
         bge_sps = getattr(train_bge_fold, "last_throughput", 26.0)
@@ -4274,7 +4241,6 @@ def run_dry_run_verifier():
     print("  Recursive multi-layer hook capture across nested PEFT/HF wrappers verified [OK]")
 
     if qwen_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         qwen_smoke_kw = {}
         if "qwen" in smoke_caches:
             qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr"]
@@ -4290,7 +4256,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **qwen_smoke_kw,
         )
-        qwen_dur = time.perf_counter() - t0
         check_finite_logits(val_qwen, "Qwen Val")
         check_finite_logits(test_qwen, "Qwen Test")
         qwen_sps = getattr(train_qwen_lora_fold, "last_throughput", 3.2 if is_qwen3 else 3.5)
@@ -4331,7 +4296,6 @@ def run_dry_run_verifier():
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
     print("[Check 6/9] Testing CPU Multiview Dual-Linear, Sibling Specialists & Subspace Projector...", flush=True)
-    t0 = time.perf_counter()
     feature_extractor = build_cpu_feature_extractor(style_weight=0.2)
     all_raw = texts_tr + texts_va + texts_te
     with threadpool_limits(limits=4):
@@ -4401,7 +4365,6 @@ def run_dry_run_verifier():
         check_finite_logits(val_svm, "CPU linear val logits")
         check_finite_logits(test_svm, "CPU linear test logits")
 
-    cpu_smoke_dur = time.perf_counter() - t0
     # Modeling full production CPU linear with external data (N_comb = 26,184 rows)
     cpu_fit_sps = 1500.0  # Measured sparse linear throughput on 4 vCPUs
     cpu_fold_sec = (N_COMB_FOLD / cpu_fit_sps) + 4.5  # Sibling specialists + dense stylometrics + subblend
@@ -4550,7 +4513,7 @@ def run_dry_run_verifier():
     oom_recovered = False
     try:
         raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 2.50 GiB")
-    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+    except (torch.cuda.OutOfMemoryError, RuntimeError):
         gc.collect()
         if cuda_ok:
             for gi in range(n_gpus):
@@ -4716,7 +4679,7 @@ def run_dry_run_verifier():
     print("-" * 74)
     print("  0. Baseline Reference (Public Gold Medal)             0.6540")
     print("  --------------------------------------------------------------------")
-    print("  1. CPU Multiview Dual-Linear (~850k + 132 style)       0.4950 - 0.5120")
+    print("  1. CPU Multiview Dual-Linear (~850k + 145 style)       0.4950 - 0.5120")
     print("  2. BGE-large-en-v1.5 Full FT (Focal + Family Aux)      0.6180 - 0.6340")
     print("  3. DeBERTa-v3-large Full FT (Focal + Smooth Weights)  0.6320 - 0.6480")
     print(f"  4. {qwen_desc} LoRA (Dual-GPU, Family Aux, SWA)       0.6580 - 0.6740")

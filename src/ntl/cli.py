@@ -230,7 +230,7 @@ def benchmark(args):
     scaled["id"] = [f"benchmark-{i}" for i in range(len(scaled))]
     t = time.perf_counter()
     with threadpool_limits(limits=args.threads):
-        out = predict_frame(load_bundle(args.model), scaled, args.batch_size)
+        predict_frame(load_bundle(args.model), scaled, args.batch_size)
     report = {**metadata(), "rows": len(scaled), "seconds": time.perf_counter() - t,
               "process_peak_rss_mib": get_peak_rss_mib(),
               "model_sha256": fingerprint(args.model), "source_sha256": fingerprint(args.test),

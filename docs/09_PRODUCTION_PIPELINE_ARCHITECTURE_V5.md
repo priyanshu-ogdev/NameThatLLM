@@ -26,12 +26,12 @@ The **Name That LLM** production pipeline ([`kaggle_tri_ensemble.py`](file:///d:
 ├──────────────────┤               ├──────────────────┤               ├──────────────────┤
 │ DeBERTa-v3-large │               │ BGE-large-en-v1.5│               │ CPU Multiview    │
 │ Full Fine-Tune   │               │ Full Fine-Tune   │               │ Dual-Linear      │
-│ BS=12, GA=1      │               │ BS=16, GA=1      │               │ ~850k n-grams    │
-│ L=352 Head+Tail  │               │ L=352 Head+Tail  │               │ 132 stylometrics │
+│ BS=16, GA=1      │               │ BS=20, GA=1      │               │ ~850k n-grams    │
+│ L=448 Head+Tail  │               │ L=448 Head+Tail  │               │ 145 stylometrics │
 │ Grad Checkpoint  │               │ Grad Checkpoint  │               │ LinearSVC+Ridge  │
-│ LLRD (ξ=0.90)    │               │ LLRD (ξ=0.85)    │               │ Logistic Calibr. │
-│ Multi-Moment Pool│               │ Multi-Moment Pool│               │ PromptDF Filter  │
-│ TopicBlind + SiFT│               │ TopicBlind + SiFT│               │ Sparse-Anchored  │
+│ LLRD (ξ=0.90)    │               │ LLRD (ξ=0.85)    │               │ 1,835-dim Kernel │
+│ Multi-Moment(-1, │               │ Multi-Moment(-1, │               │ PromptDF Filter  │
+│  -3,-6) + SiFT   │               │  -3,-6) + SiFT   │               │ Sparse-Anchored  │
 └──────────────────┘               └──────────────────┘               └──────────────────┘
           ▲                                  ▲                                  ▲
           └─────────────────┬────────────────┘                                  │
@@ -72,25 +72,25 @@ The **Name That LLM** production pipeline ([`kaggle_tri_ensemble.py`](file:///d:
 ### Stream Isolation Strategy
 1. **GPU 0 Dedicated: DeBERTa-v3-large Full Fine-Tune**:
    - Dedicated exclusively to `cuda:0`.
-   - Batch size = 12, Gradient Accumulation = 1, Sequence length = 352 (Head+Tail: 176 + 176).
-   - Peak VRAM: ~4.9 GB with upfront gradient checkpointing.
-   - Upgrades: `StylometricMultiMomentPooler` (`[CLS ⊕ Mean ⊕ Max]`), LLRD $\xi = 0.90$, training-time `TopicBlindAndSiFTPrep` (30% `[MASK]` on PromptDF < 3), and detached SiFT noise ($\epsilon = 0.015$).
+   - Batch size = 16, Gradient Accumulation = 1, Sequence length = 448 (Head+Tail: 224 + 224 train/val; 128 + 320 TTA test).
+   - Peak VRAM: ~6.2 GB with upfront gradient checkpointing and trainable-only bottom-layer skip.
+   - Upgrades: 4-Moment `StylometricMultiMomentPooler` (`[CLS ⊕ Mean ⊕ Max ⊕ Std]`) + Multi-Layer Fusion (`-1, -3, -6`), LLRD $\xi = 0.90$, training-time `TopicBlindAndSiFTPrep` (30% `[MASK]` on PromptDF < 3), and detached SiFT noise ($\epsilon = 0.015$).
 2. **GPU 1 Dedicated: BGE-large-en-v1.5 Full Fine-Tune**:
    - Dedicated exclusively to `cuda:1`.
-   - Batch size = 16, Gradient Accumulation = 1, Sequence length = 352.
-   - Peak VRAM: ~3.8 GB.
-   - Upgrades: `StylometricMultiMomentPooler` (breaks RetroMAE retrieval semantic collapse), LLRD $\xi = 0.85$ (heavily decays layers 1–12 by 85–95% to preserve lower syntax), TopicBlind 30% `[MASK]` prep, and detached SiFT noise ($\epsilon = 0.015$).
+   - Batch size = 20, Gradient Accumulation = 1, Sequence length = 448.
+   - Peak VRAM: ~4.8 GB.
+   - Upgrades: 4-Moment `StylometricMultiMomentPooler` + Multi-Layer Fusion (`-1, -3, -6`, breaks RetroMAE retrieval semantic collapse), LLRD $\xi = 0.85$ (heavily decays layers 1–12 by 85–95% to preserve lower syntax), TopicBlind 30% `[MASK]` prep, and detached SiFT noise ($\epsilon = 0.015$).
 3. **Concurrent Parallel Execution**:
    - DeBERTa (GPU 0) and BGE (GPU 1) execute **simultaneously in parallel** via `concurrent.futures.ThreadPoolExecutor(max_workers=2)`.
-   - Halves transformer training wall-clock time from ~2.2 hours to ~1.1 hours across 5 folds.
+   - Compresses the concurrent transformer stage to ~57.4 min across 5 folds.
 4. **Dual GPU Sharded: Qwen 3 8B / 2.5 7B LoRA**:
    - Automatically sharded across `cuda:0` and `cuda:1` via `device_map="auto"`.
    - Priority hierarchy: Qwen 3 8B (Tier 0) $\to$ Qwen 2.5 7B (Tier 1).
-   - Dynamic micro-batching: `BS=8, GA=2` on Qwen 3 (GPU 0 peak VRAM: 10.8 GB, 2.96 GB headroom); `BS=16, GA=1` on Qwen 2.5.
-   - Upgraded head: `SpikeAndGapHierarchicalHead` with **Multi-Layer Hidden State Fusion** across discourse (-1), syntax (-5), and BPE cadence (-9) layers + Mean $\oplus$ Learned Spike Attention Gate $\oplus$ Masked Max Spike $\oplus$ Token Transition Jerk Stats $||\Delta h_t||_2$ projected onto a 1024-dim unit hypersphere with $K=3$ sub-centers per class ($\tau=16.0$).
+   - Dynamic micro-batching: `BS=8, GA=2` on Qwen 3 (GPU 0 peak VRAM: ~11.2 GB, >3.3 GB headroom); `BS=16, GA=1` on Qwen 2.5 (~9.9 GB/GPU).
+   - Upgraded head: `SpikeAndGapHierarchicalHead` with recursive **Multi-Layer Hidden State Fusion** across discourse (-1), syntax (-5), and BPE cadence (-9) layers + Mean $\oplus$ Learned Spike Attention Gate $\oplus$ Masked Max Spike $\oplus$ Token Transition Jerk Stats $||\Delta h_t||_2$ projected onto a 1024-dim unit hypersphere with $K=3$ sub-centers per class ($\tau=16.0$).
 5. **CPU Multiview Dual-Linear Pipeline with External Injection**:
    - Operates on host RAM across 4 vCPUs using `threadpoolctl(limits=4)`.
-   - Combines ~850,000 sparse n-gram features (char 2-5, word 1-3, char_wb 2-5, punct 1-3) with 132 dense stylometric features.
+   - Combines ~850,000 sparse n-gram features (char 2-5, word 1-3, char_wb 2-5, punct 1-3) with 145 dense stylometric features expanded via `NonLinearStylometricKernelExpander` to 1,835 Poly-2 + Nyström RBF dimensions.
    - Ingests 24,025 passages from `external_short_wide.parquet` with **Kish ESS variance-capping** ($\le 0.35$), **regularizer invariance**, and **moment alignment**.
    - Refines margins using dedicated **Intra-Family Clique Specialists** (breaking sibling ties in Anthropic, Google, OpenAI, Zhipu).
 
@@ -196,6 +196,7 @@ Alternates row and column normalizations until relative change $< 10^{-3}$, perf
 | :--- | :--- | :---: | :---: |
 | **Upgrade 2 & V6 Math** | Variance capping ($\le 0.35$), Kish ESS math, LDAM margin ($2.88\times$), SVD class demeaning, Moment alignment, Clique specialists | 6 | **100% Passed** |
 | **Negative Stress Tests** | Empty slices, single-row test, NaN/Inf traps, submission schema assertion, FocalLoss autograd | 20 | **100% Passed** |
-| **V6 Architecture Tests** | Multi-layer hidden state fusion, smoothed family logits, nested CV meta-combiner | 5 | **100% Passed** |
-| **Notebook Parity** | Exact byte match between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py` | 1 | **100% Match (140,466 chars, 3,124 lines)** |
-| **Ruff Linter** | Complete syntax and quality audit | All | **0 Errors** |
+| **RAM & Sibling Suite** | Sibling difficulty margins, 1,835-dim Kernel Expander, paired microbatching, `GLOBAL_RAM_MODEL_CACHE`, `FastBatchPrefetcher` | 8 | **100% Passed** |
+| **9-Check Dry Run** | Hardware, token/TTA cache, DeBERTa/BGE/Qwen2 hooks, 145-dim CPU expander, Sinkhorn/Meta-CV, fault tolerance, 5.78h budget | 9 | **100% Passed** |
+| **Notebook Parity** | Exact byte match between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py` | 1 | **100% Match (183,229 chars, 3,937 lines)** |
+| **Ruff Linter** | Complete syntax, unused import/variable, and undefined-name audit | All | **0 Errors** |

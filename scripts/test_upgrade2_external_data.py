@@ -26,15 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from notebooks.kaggle_tri_ensemble import (
     LABELS,
     NUM_CLASSES,
-    FAMILY_MAP,
-    FAMILY_TO_INDICES,
     DualLinearClassifier,
     DenseStylometricClassifier,
     IntraFamilyCliqueSpecialist,
     StyleInvariantSubspaceProjector,
     BalancedLogitAdjustedLDAMLoss,
     build_mass_balanced_external_corpus,
-    compute_fold_variance_capped_weights,
     align_external_dense_moments,
 )
 

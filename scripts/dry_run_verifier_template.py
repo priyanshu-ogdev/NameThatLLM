@@ -158,7 +158,6 @@ def run_dry_run_verifier():
     print("  StylometricMultiMomentPooler Multi-Layer Fusion (-1, -3, -6) & gradient backpropagation verified [OK]")
 
     if deberta_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         deb_smoke_kw = {}
         if "deberta" in smoke_caches:
             deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr"]
@@ -175,7 +174,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **deb_smoke_kw,
         )
-        deb_dur = time.perf_counter() - t0
         check_finite_logits(val_deb, "DeBERTa Val")
         check_finite_logits(test_deb, "DeBERTa Test")
         deb_sps = getattr(train_deberta_fold, "last_throughput", 20.0)
@@ -210,7 +208,6 @@ def run_dry_run_verifier():
     target_bge_dev = "cuda:1" if n_gpus >= 2 else ("cuda:0" if cuda_ok else "cpu")
     print(f"[Check 4/9] Testing BGE-large Mini-Training on GPU 1 ({target_bge_dev})...", flush=True)
     if bge_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         bge_smoke_kw = {}
         if "bge" in smoke_caches:
             bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr"]
@@ -227,7 +224,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **bge_smoke_kw,
         )
-        bge_dur = time.perf_counter() - t0
         check_finite_logits(val_bge, "BGE Val")
         check_finite_logits(test_bge, "BGE Test")
         bge_sps = getattr(train_bge_fold, "last_throughput", 26.0)
@@ -308,7 +304,6 @@ def run_dry_run_verifier():
     print("  Recursive multi-layer hook capture across nested PEFT/HF wrappers verified [OK]")
 
     if qwen_dir is not None and cuda_ok:
-        t0 = time.perf_counter()
         qwen_smoke_kw = {}
         if "qwen" in smoke_caches:
             qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr"]
@@ -324,7 +319,6 @@ def run_dry_run_verifier():
             group_ids_tr=group_ids[:mini_n_tr],
             **qwen_smoke_kw,
         )
-        qwen_dur = time.perf_counter() - t0
         check_finite_logits(val_qwen, "Qwen Val")
         check_finite_logits(test_qwen, "Qwen Test")
         qwen_sps = getattr(train_qwen_lora_fold, "last_throughput", 3.2 if is_qwen3 else 3.5)
@@ -365,7 +359,6 @@ def run_dry_run_verifier():
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
     print("[Check 6/9] Testing CPU Multiview Dual-Linear, Sibling Specialists & Subspace Projector...", flush=True)
-    t0 = time.perf_counter()
     feature_extractor = build_cpu_feature_extractor(style_weight=0.2)
     all_raw = texts_tr + texts_va + texts_te
     with threadpool_limits(limits=4):
@@ -435,7 +428,6 @@ def run_dry_run_verifier():
         check_finite_logits(val_svm, "CPU linear val logits")
         check_finite_logits(test_svm, "CPU linear test logits")
 
-    cpu_smoke_dur = time.perf_counter() - t0
     # Modeling full production CPU linear with external data (N_comb = 26,184 rows)
     cpu_fit_sps = 1500.0  # Measured sparse linear throughput on 4 vCPUs
     cpu_fold_sec = (N_COMB_FOLD / cpu_fit_sps) + 4.5  # Sibling specialists + dense stylometrics + subblend
@@ -584,7 +576,7 @@ def run_dry_run_verifier():
     oom_recovered = False
     try:
         raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 2.50 GiB")
-    except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+    except (torch.cuda.OutOfMemoryError, RuntimeError):
         gc.collect()
         if cuda_ok:
             for gi in range(n_gpus):
@@ -750,7 +742,7 @@ def run_dry_run_verifier():
     print("-" * 74)
     print("  0. Baseline Reference (Public Gold Medal)             0.6540")
     print("  --------------------------------------------------------------------")
-    print("  1. CPU Multiview Dual-Linear (~850k + 132 style)       0.4950 - 0.5120")
+    print("  1. CPU Multiview Dual-Linear (~850k + 145 style)       0.4950 - 0.5120")
     print("  2. BGE-large-en-v1.5 Full FT (Focal + Family Aux)      0.6180 - 0.6340")
     print("  3. DeBERTa-v3-large Full FT (Focal + Smooth Weights)  0.6320 - 0.6480")
     print(f"  4. {qwen_desc} LoRA (Dual-GPU, Family Aux, SWA)       0.6580 - 0.6740")

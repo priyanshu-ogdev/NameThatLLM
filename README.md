@@ -29,7 +29,7 @@ Comprehensive analysis, documentation, baseline pipelines, and benchmark solutio
 | **Frozen Qwen3-1.7B-Base + Linear SVM** | Free T4 GPU (16.5m) | 35.12% | — | Middle-layer token embeddings from causal LM |
 | **CPU SVM + Qwen-1.7B Equal-Rank Blend** | **Free T4 GPU (15.8m)** | **40.93%** | **0.417** | **Zero-parameter rank summation across 18 margins** |
 | **Quad-Model Frontier Ensemble (v5 Standalone)** | **Dual Tesla T4 (4.8h–6.2h)** | **72.80% – 75.00%** | **Target >0.70** | **DeBERTa + BGE (Concurrent Multi-Moment) + Qwen 3 8B / 2.5 7B LoRA + CPU Dual-Linear + Nested CV Meta-Combiner + Sinkhorn** |
-| **Quad-Model Frontier Ensemble (V6 Production)** | **Dual Tesla T4 (6.5h–7.6h)** | **78.20% – 80.50%+** | **Target >0.78** | **V5 Pipeline + Zero-VRAM External Injection (Kish ESS Capped, 0% Skew) + Clique Sibling Specialists + Demeaned Topic SVD Projection** |
+| **Quad-Model Frontier Ensemble (V6 Production)** | **Dual Tesla T4 (4.92h–5.78h / 8.2h guard)** | **78.20% – 80.50%+** | **Target >0.78** | **V5 Pipeline + Multi-Layer Fusion (-1,-3,-6/-9) + 145 Stylometrics & 1,835-Dim Kernel + Zero-VRAM External Injection (Kish ESS Capped, 0% Skew) + Clique Specialists** |
 
 ---
 
@@ -62,18 +62,19 @@ d:/NameThatLLM/
 │   ├── 11_FIRST_KAGGLE_RUN_ANALYSIS_AND_LESSONS.md   # First Kaggle Execution Results, Fold Table & Crash Forensics
 │   ├── 12_QWEN3_UPGRADE_AND_KAGGLE_INPUT_GUIDE.md    # Qwen 3 8B Architecture, Offline Wheels & Kaggle Inputs
 │   ├── 13_GENERALIZATION_REPAIRS_AND_CPU_META_LEARNER.md # Stylometric Pooling, TopicBlind, SiFT & CPU Meta-Combiner
-│   └── 14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md # Kish ESS Capping, Clique Specialists, Topic SVD & V6 Design
+│   ├── 14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md # Kish ESS Capping, Clique Specialists, Topic SVD & V6 Design
+│   └── 15_FORENSIC_AUDIT_AND_LATENCY_OPTIMIZATION_REPORT.md # 8 Latency Fixes, 7 Structural Hardening Fixes & Throughput Audit
 ├── src/ntl/                             # Modular Python package
 │   ├── data.py                          # Strict schemas, DSU duplicate grouping, StratifiedGroupKFold
 │   ├── models.py                        # FeatureUnion pipelines, RichStyleFeatures, LinearSVC
 │   ├── ensemble.py                      # Out-of-fold rank blending and meta-stacking
 │   ├── generative.py                    # Frozen Qwen/causal LM feature extraction
-│   ├── preprocessing.py                 # Clean text, 132-dim rich stylometrics, multiview preprocessor
+│   ├── preprocessing.py                 # Clean text, 110-dim rich stylometrics (V6 notebooks: 145-dim), multiview preprocessor
 │   └── cli.py                           # Command-line interface (`ntl prepare`, `ntl evaluate`)
 ├── notebooks/                           # Ready-to-run Kaggle notebooks
 │   ├── kaggle_tri_ensemble.py           # V6 Production Ensemble (DeBERTa + BGE + Qwen + CPU Linear + External Data)
 │   ├── kaggle_tri_ensemble.ipynb        # Ready-to-upload V6 Production Jupyter Notebook
-│   ├── kaggle_dry_run.py                # V6 Production Smoke Test & Model Throughput Profiler
+│   ├── kaggle_dry_run.py                # V6 Production Smoke Test & 9-Check Throughput Profiler
 │   ├── kaggle_dry_run.ipynb             # Ready-to-upload V6 Smoke Test Jupyter Notebook
 │   ├── kaggle_train_and_submit.py       # Route A: Standalone CPU submission (0.372 LB)
 │   └── kaggle_combined.py               # Route B: GPU Rank-Blend ensemble (0.417 LB)
@@ -114,8 +115,8 @@ d:/NameThatLLM/
 
 ## 📌 Submission Instructions
 
-See [`docs/06_KAGGLE_SUBMISSION_GUIDE.md`](docs/06_KAGGLE_SUBMISSION_GUIDE.md), [`docs/09_PRODUCTION_PIPELINE_ARCHITECTURE_V5.md`](docs/09_PRODUCTION_PIPELINE_ARCHITECTURE_V5.md), and [`docs/14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md`](docs/14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md) for complete instructions:
+See [`docs/06_KAGGLE_SUBMISSION_GUIDE.md`](docs/06_KAGGLE_SUBMISSION_GUIDE.md), [`docs/09_PRODUCTION_PIPELINE_ARCHITECTURE_V5.md`](docs/09_PRODUCTION_PIPELINE_ARCHITECTURE_V5.md), [`docs/14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md`](docs/14_EXTERNAL_DATA_LONG_TAIL_AND_V6_ARCHITECTURE.md), and [`docs/15_FORENSIC_AUDIT_AND_LATENCY_OPTIMIZATION_REPORT.md`](docs/15_FORENSIC_AUDIT_AND_LATENCY_OPTIMIZATION_REPORT.md) for complete instructions:
 - **Fast 0.372 LB (Route A):** Paste [`notebooks/kaggle_train_and_submit.py`](notebooks/kaggle_train_and_submit.py) into a Kaggle Notebook (CPU, Internet Off).
 - **Strong 0.417 LB (Route B):** Paste [`notebooks/kaggle_combined.py`](notebooks/kaggle_combined.py) into a Kaggle Notebook (GPU T4, attach `qwen-3/1.7b-base`, Internet Off).
-- **Frontier Quad-Model Production Ensemble (Route D - Target 78%–80%+):** Upload [`notebooks/kaggle_tri_ensemble.ipynb`](notebooks/kaggle_tri_ensemble.ipynb) (or paste [`notebooks/kaggle_tri_ensemble.py`](notebooks/kaggle_tri_ensemble.py)) into a Kaggle Notebook (Dual GPU Tesla T4 x2, Internet Off). Attach datasets: `name-that-llm`, `external_short_wide.parquet`, `deberta-v3-large`, `bge-large-en-v1.5`, and `qwen2.5-7b-instruct` / `qwen-3`. Runs concurrently and produces a competition-compliant `/kaggle/working/submission.parquet` within ~7.2h with immediate Step 1 baseline submission and incremental checkpoints saved after every fold.
-- **Pre-flight Smoke Test & Throughput Profiler:** Run [`notebooks/kaggle_dry_run.ipynb`](notebooks/kaggle_dry_run.ipynb) to validate all 8 pre-flight checks, throughput benchmarks, and memory stability in under 2 minutes.
+- **Frontier Quad-Model Production Ensemble (Route D - Target 78%–80%+):** Upload [`notebooks/kaggle_tri_ensemble.ipynb`](notebooks/kaggle_tri_ensemble.ipynb) (or paste [`notebooks/kaggle_tri_ensemble.py`](notebooks/kaggle_tri_ensemble.py)) into a Kaggle Notebook (Dual GPU Tesla T4 x2, Internet Off). Attach datasets: `name-that-llm`, `external_short_wide.parquet`, `deberta-v3-large`, `bge-large-en-v1.5`, and `qwen2.5-7b-instruct` / `qwen-3`. Runs concurrently and produces a competition-compliant `/kaggle/working/submission.parquet` in ~4.92h–5.78h (295.2–346.8 min with 2x TTA, +2.42h to +3.28h headroom vs 8.2h guard) with immediate Step 1 baseline submission and incremental checkpoints saved after every fold.
+- **Pre-flight Smoke Test & Throughput Profiler:** Run [`notebooks/kaggle_dry_run.ipynb`](notebooks/kaggle_dry_run.ipynb) to validate all 9 pre-flight checks, throughput benchmarks, and memory stability in under 2 minutes.

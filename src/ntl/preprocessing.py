@@ -1,8 +1,6 @@
 """Robust, leak-free text preprocessing and stylometric feature extraction for Name That LLM."""
 import re
-import hashlib
 import numpy as np
-import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import FeatureUnion, Pipeline

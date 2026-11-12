@@ -3,15 +3,12 @@ sys.path.insert(0, ".")
 
 import torch
 import numpy as np
-from sklearn.metrics import balanced_accuracy_score
 from notebooks.kaggle_tri_ensemble import (
     compute_family_logits,
     SpikeAndGapHierarchicalHead,
     CPUGradientMetaCombiner,
     NUM_CLASSES,
-    LABELS,
     FAMILIES,
-    FAMILY_TO_INDICES,
 )
 
 def test_v6_upgrades():

@@ -1,5 +1,6 @@
 """Pinned, offline two-GPU Qwen3-8B-Base experiment with a bounded pilot."""
 import importlib.metadata
+import importlib.util
 import hashlib
 import json
 import time
@@ -69,10 +70,8 @@ def load_qwen8(model_dir, allow_cpu=False):
     started = time.perf_counter()
     if allow_cpu or torch.cuda.device_count() < 2:
         raise RuntimeError('Select GPU T4 ×2. Full 8B CPU extraction is deliberately disabled.')
-    try:
-        import accelerate
-    except ImportError as error:
-        raise RuntimeError('This Kaggle runtime lacks Accelerate. Share this error; compatible offline dependencies must be attached.') from error
+    if importlib.util.find_spec('accelerate') is None:
+        raise RuntimeError('This Kaggle runtime lacks Accelerate. Share this error; compatible offline dependencies must be attached.')
     free = [torch.cuda.mem_get_info(i)[0] for i in range(2)]
     plan = gpu_memory_plan(free)
     names = [torch.cuda.get_device_name(i) for i in range(2)]

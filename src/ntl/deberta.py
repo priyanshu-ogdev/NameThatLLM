@@ -1,5 +1,4 @@
 """DeBERTa-v3 bidirectional contextual feature extraction for Name That LLM."""
-import gc
 import json
 from pathlib import Path
 from typing import List, Optional, Tuple

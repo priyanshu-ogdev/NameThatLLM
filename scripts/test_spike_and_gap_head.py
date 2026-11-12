@@ -3,7 +3,6 @@ sys.path.insert(0, ".")
 
 import torch
 import torch.nn as nn
-import numpy as np
 from notebooks.kaggle_tri_ensemble import SpikeAndGapHierarchicalHead, StylometricMultiMomentPooler, capture_intermediate_layers
 
 def test_spike_and_gap_hierarchical_head():

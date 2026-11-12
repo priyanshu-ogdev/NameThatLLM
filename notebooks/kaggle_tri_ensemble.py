@@ -3008,7 +3008,7 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
     kwargs.setdefault("lr_backbone", 1.8e-5)
     kwargs.setdefault("lr_head", 1.5e-4)
     kwargs.setdefault("layer_decay", 0.90)
-    kwargs.setdefault("enable_grad_checkpointing", False)
+    kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "DeBERTa FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -3023,7 +3023,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
     kwargs.setdefault("lr_backbone", 2.2e-5)
     kwargs.setdefault("lr_head", 1.2e-4)
     kwargs.setdefault("layer_decay", 0.85)
-    kwargs.setdefault("enable_grad_checkpointing", False)
+    kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -4704,7 +4704,7 @@ def run_quad_ensemble():
         run_bge = bge_dir is not None and (time.perf_counter() + bge_expected + SAFETY_MARGIN_SEC < pipeline_deadline)
 
         if run_deb and run_bge and n_gpus >= 2:
-            print(f"\n[Fold {fold+1}] Launching CONCURRENT Dual-GPU Training: DeBERTa ({deb_dev}, BS=16, GA=1, ckpt=OFF) || BGE ({bge_dev}, BS=20, GA=1, ckpt=OFF)", flush=True)
+            print(f"\n[Fold {fold+1}] Launching CONCURRENT Dual-GPU Training: DeBERTa ({deb_dev}, BS=16, GA=1, ckpt=ON) || BGE ({bge_dev}, BS=20, GA=1, ckpt=ON)", flush=True)
             t_par_start = time.perf_counter()
 
             def _train_deb_worker():
@@ -4713,7 +4713,7 @@ def run_quad_ensemble():
                     deberta_dir, LABELS,
                     device=deb_dev,
                     batch_size=16, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=False,
+                    epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     **deb_kw,
@@ -4725,7 +4725,7 @@ def run_quad_ensemble():
                     bge_dir, LABELS,
                     device=bge_dev,
                     batch_size=20, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=False,
+                    epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     **bge_kw,
@@ -4769,14 +4769,14 @@ def run_quad_ensemble():
         else:
             if run_deb:
                 try:
-                    print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=OFF)", flush=True)
+                    print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
                     m_t0 = time.perf_counter()
                     val_deb, test_deb = train_deberta_fold(
                         texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                         deberta_dir, LABELS,
                         device=deb_dev,
                         batch_size=16, grad_accum=1, max_length=448,
-                        epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=False,
+                        epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
                         deadline=pipeline_deadline,
                         group_ids_tr=group_ids[tr_idx],
                         **deb_kw,
@@ -4796,14 +4796,14 @@ def run_quad_ensemble():
 
             if run_bge:
                 try:
-                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=OFF)", flush=True)
+                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
                     m_t0 = time.perf_counter()
                     val_bge, test_bge = train_bge_fold(
                         texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                         bge_dir, LABELS,
                         device=bge_dev,
                         batch_size=20, grad_accum=1, max_length=448,
-                        epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=False,
+                        epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
                         deadline=pipeline_deadline,
                         group_ids_tr=group_ids[tr_idx],
                         **bge_kw,

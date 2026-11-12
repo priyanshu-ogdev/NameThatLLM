@@ -3008,7 +3008,7 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
     kwargs.setdefault("lr_backbone", 1.8e-5)
     kwargs.setdefault("lr_head", 1.5e-4)
     kwargs.setdefault("layer_decay", 0.90)
-    kwargs.setdefault("enable_grad_checkpointing", False)
+    kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "DeBERTa FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -3023,7 +3023,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
     kwargs.setdefault("lr_backbone", 2.2e-5)
     kwargs.setdefault("lr_head", 1.2e-4)
     kwargs.setdefault("layer_decay", 0.85)
-    kwargs.setdefault("enable_grad_checkpointing", False)
+    kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -4672,7 +4672,7 @@ def run_dry_run_verifier():
             deberta_dir, LABELS,
             device="cuda:0",
             batch_size=16, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=False,
+            enable_grad_checkpointing=True,
             group_ids_tr=group_ids_mini_tr,
             **deb_smoke_kw,
         )
@@ -4696,9 +4696,9 @@ def run_dry_run_verifier():
         deb_sps = getattr(train_deberta_fold, "last_throughput", 13.10)
         deb_eval_sps = 42.0
     else:
-        deb_sps = 13.10      # Measured baseline on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=OFF auto-OOM raises live throughput)
+        deb_sps = 13.10      # Measured baseline on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=ON -> 4.98/14.56 GB)
         deb_eval_sps = 42.0  # Conservative eval baseline (eval_bs=48 in production)
-        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=OFF).", flush=True)
+        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=ON).", flush=True)
 
     deb_train_sec = N_TRAIN_FOLD / max(deb_sps, 0.1)
     deb_eval_sec = N_VAL_FOLD / max(deb_eval_sps, 0.1)
@@ -4739,7 +4739,7 @@ def run_dry_run_verifier():
             bge_dir, LABELS,
             device=target_bge_dev,
             batch_size=20, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=False,
+            enable_grad_checkpointing=True,
             group_ids_tr=group_ids_mini_tr,
             **bge_smoke_kw,
         )
@@ -4763,7 +4763,7 @@ def run_dry_run_verifier():
         bge_sps = getattr(train_bge_fold, "last_throughput", 16.76)
         bge_eval_sps = 55.0
     else:
-        bge_sps = 16.76      # Measured baseline on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=OFF auto-OOM raises live throughput)
+        bge_sps = 16.76      # Measured baseline on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=ON -> 4.69/14.56 GB)
         bge_eval_sps = 55.0  # Conservative eval baseline (eval_bs=48 in production)
         print(f"  [BGE Simulation] Using calibrated Kaggle T4 throughput on {target_bge_dev}.", flush=True)
 

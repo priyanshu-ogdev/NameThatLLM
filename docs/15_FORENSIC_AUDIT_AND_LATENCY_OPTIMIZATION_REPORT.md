@@ -3,7 +3,7 @@
 **Target:** Kaggle Competition — *Name That LLM*  
 **Hardware Profile:** Dual Tesla T4 GPUs ($2 \times 14.56\text{ GB} = 29.12\text{ GB}$ VRAM), 4 vCPUs, 31.3 GB Host RAM  
 **Wall-Clock Limits:** 9.0h hard Kaggle timeout / 8.2h internal pipeline guard  
-**Primary Production Schedule:** DeBERTa-v3-large (`4 ep`, `BS=16`, `ckpt=OFF` auto-OOM) || BGE-large-en-v1.5 (`5 ep`, `BS=20`, `ckpt=OFF` auto-OOM) + Qwen 3 8B (`2 ep`) / Qwen 2.5 7B (`3 ep`) LoRA + Deduplicated TTA (`224+224` & `128+320`) + CPU Dual-Linear (145 stylometrics / 1,835-dim Poly-2 + RBF kernel + external corpus)
+**Primary Production Schedule:** DeBERTa-v3-large (`4 ep`, `BS=16`, `ckpt=ON`) || BGE-large-en-v1.5 (`5 ep`, `BS=20`, `ckpt=ON`) + Qwen 3 8B (`2 ep`) / Qwen 2.5 7B (`3 ep`) LoRA + Deduplicated TTA (`224+224` & `128+320`) + CPU Dual-Linear (145 stylometrics / 1,835-dim Poly-2 + RBF kernel + external corpus)
 
 ---
 
@@ -50,8 +50,8 @@ From [`notebooks/kaggle_dry_run.py`](file:///d:/NameThatLLM/notebooks/kaggle_dry
 | Pipeline Stage | Calibrated Throughput | 5-Fold Time | Notes |
 |---|---|---:|---|
 | **CPU Dual-Linear + Clique Specialists** | `160 rows/s` end-to-end | **15.6 min** (`0.26h`) | 4 vCPUs; 8 sparse classifiers + `1,835`-dim kernel |
-| **DeBERTa-v3-large FT (4 ep, GPU 0)** | `13.10 train / 42.0 eval s/s` | **68.8 min** (`1.15h`) | `BS=16, L=448`, `ckpt=OFF` (auto-OOM fallback), `eval_bs=48`, Dedup TTA |
-| **BGE-large-en-v1.5 FT (5 ep, GPU 1)** | `16.76 train / 55.0 eval s/s` | **65.0 min** (`1.08h`) | `BS=20, L=448`, `ckpt=OFF` (auto-OOM fallback), `eval_bs=48`, Dedup TTA |
+| **DeBERTa-v3-large FT (4 ep, GPU 0)** | `13.10 train / 42.0 eval s/s` | **68.8 min** (`1.15h`) | `BS=16, L=448`, `ckpt=ON` (`4.98/14.56 GB`), `eval_bs=48`, Dedup TTA |
+| **BGE-large-en-v1.5 FT (5 ep, GPU 1)** | `16.76 train / 55.0 eval s/s` | **65.0 min** (`1.08h`) | `BS=20, L=448`, `ckpt=ON` (`4.69/14.56 GB`), `eval_bs=48`, Dedup TTA |
 | **Concurrent Transformer Stage** | `ThreadPool(2)` | **68.8 min** (`1.15h`) | `max(GPU 0, GPU 1)` when `n_gpus >= 2` (`133.8 min` sequential fallback) |
 | **Qwen 2.5 7B LoRA (3 ep, Dual GPU)** | `3.50 train / 12.0 eval s/s` | **201.3 min** (`3.35h`) | `device_map="auto"`, `inf_bs=24`, Dedup TTA (Qwen 3 8B 2 ep @ `1.76 s/s` also fits safely under `8.2h`) |
 | **Upfront Token/TTA Cache + Meta/Sinkhorn** | — | **7.5 min** (`0.12h`) | Single-pass TTA token cache + Platt tuning + Nested CV Meta-Combiner |
@@ -59,13 +59,14 @@ From [`notebooks/kaggle_dry_run.py`](file:///d:/NameThatLLM/notebooks/kaggle_dry
 | **TOTAL (CPU-Emulated Dry-Run Bound)** | — | **358.2 min (`5.97h`)** | **+2.23h buffer** vs 8.2h guard (reported in sequential dry run below) |
 | **Host System RAM Envelope (Folds 2..5)** | **21.50 GB / 31.30 GB** | — | **+9.80 GB (31.3%) headroom** including `17.34 GB` `GLOBAL_RAM_MODEL_CACHE` |
 
-### ⚡ 3.1 Post-Telemetry GPU Throughput & Inference Sweep
+### ⚡ 3.1 Post-Telemetry GPU Throughput, VRAM Safety & PEFT Offload Fixes
 
-Live Kaggle Dual-T4 telemetry (`DeBERTa: 13.10 s/s, 4.98/14.56 GB`, `BGE: 16.76 s/s, 4.69/14.56 GB`, `Qwen 3 8B: 1.76 s/s, 10.7/8.8 GB`) exposed 4 additional GPU-side inefficiencies that were fixed with zero accuracy change:
+Live Kaggle Dual-T4 telemetry (`DeBERTa: 13.10 s/s, 4.98/14.56 GB`, `BGE: 16.76 s/s, 4.69/14.56 GB`, `Qwen 3 8B: 1.76 s/s, 10.7/8.8 GB`) and Check 3/Check 5 stress checks drove these verified GPU fixes:
 - **Deduplicated TTA (`_blend_dedup_tta` in `evaluate_transformer_split` & `evaluate_qwen_split`):** Sequences with `<= 448` tokens produce identical `input_ids` and `attention_mask` for both `224+224` and `128+320` crops (`100%` of sequences on Kaggle `max=254 words`). Only diverging sequences (`diff_idx`) execute the second `.eval()` forward pass across all 15 neural test evaluations, saving `~55–65 min` of redundant inference with bit-for-bit identical outputs (`test_7_deduplicated_tta_bit_parity`).
-- **Disabling Encoder Gradient Checkpointing (`ckpt=OFF` + Auto-OOM Self-Healing):** With `4.98 GB` and `4.69 GB` live VRAM on `14.56 GB` T4s, `enable_grad_checkpointing=False` on DeBERTa (`BS=16`) and BGE (`BS=20`) eliminates ~25–30% backward recompute overhead while `_train_transformer_fold_impl` automatically re-enables `model.gradient_checkpointing_enable(...)` inside `except torch.cuda.OutOfMemoryError:` if a fold ever hits a memory spike.
+- **Mandatory Encoder Gradient Checkpointing on T4 (`ckpt=ON` + Auto-OOM Self-Healing):** Check 3 proved `ckpt=OFF` at `BS=16` pushed DeBERTa to `14.28 / 14.56 GB` (`98.1%`) even on short smoke passages, and autograd activation profiling confirmed `2,162.9 MB/sample` (`33.79 GB` at `BS=16, L=448`) for DeBERTa disentangled attention and `682.6 MB/sample` (`13.33 GB` activations + `~4.4 GB` weights = `~17.7 GB` at `BS=20, L=448`) for BGE. Restored `enable_grad_checkpointing=True` (`4.98 GB` and `4.69 GB` live VRAM, running in parallel on GPUs 0 & 1) while retaining automatic `gradient_checkpointing_enable` inside `_train_transformer_fold_impl`'s OOM handler as defense-in-depth.
 - **Raised `inference_mode()` Batch Sizes (`eval_bs = 48`, `inf_bs = 24`):** Increases GPU occupancy during validation and test inference while preserving the existing automatic OOM halving backoff loop.
 - **Exact Sample Accounting (`steady_samples_executed`, `ep_samples`, `ep_steady_samples`):** Counts actual `batch_labels.numel()` per non-warmup step in `_train_transformer_fold_impl` and `_train_qwen_lora_fold_impl` instead of `(n_total_micros_executed - 1) * batch_size`, removing tail-batch throughput distortion.
+- **PEFT `__getattr__`-Safe Accelerate Hook Removal & Fold 2 Fallback (`_remove_accelerate_hooks_safe`, `_align_device_map_for_module`, `_offload_qwen_backbone_to_cpu_cache`):** Strips `_hf_hook`, `_old_forward`, and `hf_device_map` strictly via `sub.__dict__` (preventing `PeftModelForFeatureExtraction` `delattr` `AttributeError` during Host RAM offload) and uses `infer_auto_device_map(...)` instead of invalid string `device_map="auto"` in `dispatch_model` fallback (`test_8_peft_accelerate_hook_offload_and_redispatch`).
 
 ---
 
@@ -88,15 +89,15 @@ All checks ran cleanly after the final code edit:
 
 | Verification Check | Command | Outcome | Key Verified Details |
 |---|---|---|---|
-| **Ruff Syntax & Undefined Check** | `python -m ruff check --select E9,F63,F7,F82 notebooks/kaggle_tri_ensemble.py notebooks/kaggle_dry_run.py scripts/test_failure_gaps_and_dry_run_parity.py` | **0 ERRORS** | Zero syntax errors, bare traps, or undefined symbols across production, dry-run, and regression suites |
-| **Notebook Byte Parity** | `python scripts/verify_notebook_parity.py` | **100% MATCH** | **207,058 chars / 4,449 shared lines** (`Exact byte match: True`) |
-| **Notebook Rebuild** | `python scripts/rebuild_notebooks.py` | **REBUILT** | [`kaggle_dry_run.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.ipynb) (`5,404` code lines) & [`kaggle_tri_ensemble.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.ipynb) (`5,237` code lines) |
-| **Failure-Gap & Parity Suite** | `python scripts/test_failure_gaps_and_dry_run_parity.py` | **7/7 PASSED** | `NaN` prompt IDs, `<2`-class clique & NaN subspace, `svm=None` blend, tiny HF BERT+Qwen2 `cached_enc_*` Fold 1$\to$2 (`epochs=2` SWA), `test_deb=None` & `id="NA"`, external schema/CSV + clean DeBERTa discovery, Deduplicated TTA bit-parity & skip |
+| **Ruff Syntax & Undefined Check** | `python -m ruff check --select E9,F63,F7,F82,F841 notebooks/kaggle_tri_ensemble.py notebooks/kaggle_dry_run.py scripts/test_failure_gaps_and_dry_run_parity.py` | **0 ERRORS** | Zero syntax errors, bare traps, or undefined symbols across production, dry-run, and regression suites |
+| **Notebook Byte Parity** | `python scripts/verify_notebook_parity.py` | **100% MATCH** | **208,260 chars / 4,482 shared lines** (`Exact byte match: True`) |
+| **Notebook Rebuild** | `python scripts/rebuild_notebooks.py` | **REBUILT** | [`kaggle_dry_run.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.ipynb) (`5,447` code lines) & [`kaggle_tri_ensemble.ipynb`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.ipynb) (`5,270` code lines) |
+| **Failure-Gap & Parity Suite** | `python scripts/test_failure_gaps_and_dry_run_parity.py` | **8/8 PASSED** | `NaN` prompt IDs, `<2`-class clique & NaN subspace, `svm=None` blend, tiny HF BERT+Qwen2 `cached_enc_*` Fold 1$\to$2, `test_deb=None` & `id="NA"`, external discovery, Dedup TTA bit-parity, PEFT + accelerate hook offload & Fold 2 re-dispatch |
 | **RAM & Sibling Suite** | `python scripts/test_ram_and_sibling_upgrades.py` | **8/8 PASSED** | Sibling margins, Poly-2+RBF expander, paired microbatching, `FastBatchPrefetcher`, `GLOBAL_RAM_MODEL_CACHE`, tree blend |
 | **External & V6 Remedies Suite** | `python scripts/test_upgrade2_external_data.py` | **6/6 PASSED** | Uniform class mass (`15.0000`), max weight `0.0884`, `93.6%` topic variance attenuated, $2.88\times$ LDAM margin |
 | **Spike & Gap + PEFT Hooks** | `python scripts/test_spike_and_gap_head.py` | **100% PASSED** | `SpikeAndGapHierarchicalHead`, 4-moment pooler, recursive PEFT `_find_layers` capture |
 | **Staged RAM Fold 1 $\to$ 2 HF** | `python scripts/test_staged_ram_optimization.py` | **100% PASSED** | Real `BertForSequenceClassification` & `Qwen2Model + PEFT` Fold 1 $\to$ 2 LoRA reset (`0.01s`) |
 | **V6 Architectural Upgrades** | `python scripts/test_v6_upgrades.py` | **100% PASSED** | Temperature-smoothed family loss, multi-layer head fusion, nested CV Meta-Combiner |
 | **20-Point Negative Stress** | `python scripts/test_negative_verification.py` | **20/20 PASSED** | Edge cases, Sinkhorn 4,000-row balance (`min=218, max=227`), FocalLoss autocast, schema validation |
-| **9-Check Pre-Flight Dry Run** | `python notebooks/kaggle_dry_run.py` | **9/9 PASSED** | Completed in **64.8s** (`358.2 min / 5.97h` budget, `+2.23h` buffer, `21.50 GB` Peak RAM Audit, **`[GREEN] GO`**) |
+| **9-Check Pre-Flight Dry Run** | `python notebooks/kaggle_dry_run.py` | **9/9 PASSED** | Completed in **14.1s** (`358.2 min / 5.97h` budget, `+2.23h` buffer, `21.50 GB` Peak RAM Audit, **`[GREEN] GO`**) |
 | **Bit-Parity Assertions** | Inline parity check | **100% PASSED** | `tokenize_with_head_tail` `extra_head_tail`, `TransductivePromptCenterer` vectorized vs loop, `IntraFamilyCliqueSpecialist` delta cache, `rank_blend` |

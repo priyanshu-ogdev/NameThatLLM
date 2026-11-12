@@ -1247,6 +1247,8 @@ class IntraFamilyCliqueSpecialist(BaseEstimator):
                 continue
             X_fam = X[fam_mask]
             y_fam = y_arr[fam_mask]
+            if len(np.unique(y_fam)) < 2:
+                continue
             w_fam = sample_weight[fam_mask] if sample_weight is not None else None
             if w_fam is not None and w_fam.sum() > 0:
                 w_fam = w_fam * (len(w_fam) / w_fam.sum())
@@ -1340,6 +1342,10 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
         if sp.issparse(X):
             raise TypeError("StyleInvariantSubspaceProjector must be applied strictly to dense matrices to prevent RAM densification.")
         X_arr = np.asarray(X, dtype=np.float32)
+        if not np.all(np.isfinite(X_arr)):
+            X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
+        if X_arr.shape[0] < 2:
+            return self
         self.mean_ = X_arr.mean(axis=0, keepdims=True)
         X_c = X_arr - self.mean_
 
@@ -1379,9 +1385,11 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
         return self
 
     def transform(self, X: np.ndarray) -> np.ndarray:
-        if self.U_topic_ is None or self.mean_ is None:
-            return X
         X_arr = np.asarray(X, dtype=np.float32)
+        if not np.all(np.isfinite(X_arr)):
+            X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.U_topic_ is None or self.mean_ is None:
+            return X_arr
         X_c = X_arr - self.mean_
         topic_proj = (X_c @ self.U_topic_) @ self.U_topic_.T
         return (X_c - self.attenuation * topic_proj) + self.mean_
@@ -2048,32 +2056,47 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        all_logits = []
-        eval_bs = 32  # Memory-safe for Tesla T4 under L=448
         cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
         pooler = get_model_pooler(model)
-        with inference_context():
-            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
-                for start in range(0, n_samples, eval_bs):
-                    end = min(start + eval_bs, n_samples)
-                    batch_indices = sort_idx[start:end]
-                    sl = {
-                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                    }
-                    if "token_type_ids" in enc:
-                        sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
-                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                    kw = {
-                        "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
-                        "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
-                    }
-                    if "token_type_ids" in padded:
-                        kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                        set_model_pooler_mask(model, kw["attention_mask"])
-                        logits = model(**kw).logits
-                    all_logits.append(logits.float().cpu().numpy())
+        eval_bs = 32  # Memory-safe for Tesla T4 under L=448 (with OOM halving backoff)
+        while True:
+            all_logits = []
+            try:
+                with inference_context():
+                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+                        for start in range(0, n_samples, eval_bs):
+                            end = min(start + eval_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            if "token_type_ids" in enc:
+                                sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            kw = {
+                                "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
+                                "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
+                            }
+                            if "token_type_ids" in padded:
+                                kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
+                            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                                set_model_pooler_mask(model, kw["attention_mask"])
+                                logits = model(**kw).logits
+                            all_logits.append(logits.float().cpu().numpy())
+                break
+            except torch.cuda.OutOfMemoryError:
+                set_model_pooler_mask(model, None)
+                if pooler is not None:
+                    pooler._extra_layers = None
+                all_logits.clear()
+                gc.collect()
+                if cuda_ok:
+                    torch.cuda.empty_cache()
+                if eval_bs <= 1:
+                    raise
+                eval_bs = max(eval_bs // 2, 1)
+                print(f"  [Eval] CUDA OOM at eval_bs={eval_bs * 2}; retrying with eval_bs={eval_bs}...", flush=True)
         set_model_pooler_mask(model, None)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
@@ -2169,45 +2192,59 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        all_logits = []
         inf_bs = 16
         autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-        with inference_context():
-            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
-                for start in range(0, n_samples, inf_bs):
-                    end = min(start + inf_bs, n_samples)
-                    batch_indices = sort_idx[start:end]
-                    sl = {
-                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                    }
-                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                    batch_kwargs = {
-                        "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
-                        "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
-                    }
-                    with autocast_ctx:
-                        out = backbone(**batch_kwargs, output_hidden_states=False)
-                        if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
-                            h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
-                        else:
-                            h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                        captured_hs.clear()
-                        del out
-                        if isinstance(head, SpikeAndGapHierarchicalHead):
-                            logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
-                        else:
-                            last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                            if getattr(tokenizer, "padding_side", "left") == "left":
-                                pooled = last_h[:, -1, :].float()
-                            else:
-                                attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                pooled = last_h[batch_idx, seq_lens].float()
-                            logits = head(pooled.to(head_dev)).float().cpu().numpy()
-                        del h_input
-                    all_logits.append(logits)
+        while True:
+            all_logits = []
+            try:
+                with inference_context():
+                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                        for start in range(0, n_samples, inf_bs):
+                            end = min(start + inf_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            batch_kwargs = {
+                                "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
+                                "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
+                            }
+                            with autocast_ctx:
+                                out = backbone(**batch_kwargs, output_hidden_states=False)
+                                if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
+                                    h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
+                                else:
+                                    h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                                captured_hs.clear()
+                                del out
+                                if isinstance(head, SpikeAndGapHierarchicalHead):
+                                    logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
+                                else:
+                                    last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                                    if getattr(tokenizer, "padding_side", "left") == "left":
+                                        pooled = last_h[:, -1, :].float()
+                                    else:
+                                        attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                        seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                        batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                        pooled = last_h[batch_idx, seq_lens].float()
+                                    logits = head(pooled.to(head_dev)).float().cpu().numpy()
+                                del h_input
+                            all_logits.append(logits)
+                break
+            except torch.cuda.OutOfMemoryError:
+                all_logits.clear()
+                gc.collect()
+                if cuda_ok:
+                    for gi in range(torch.cuda.device_count()):
+                        with torch.cuda.device(gi):
+                            torch.cuda.empty_cache()
+                if inf_bs <= 1:
+                    raise
+                inf_bs = max(inf_bs // 2, 1)
+                print(f"  [Qwen Eval] CUDA OOM at inf_bs={inf_bs * 2}; retrying with inf_bs={inf_bs}...", flush=True)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
         inv_idx[sort_idx] = np.arange(len(sort_idx))
@@ -2247,7 +2284,7 @@ def get_cosine_schedule_with_warmup_and_min_lr(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def train_transformer_fold(
+def _train_transformer_fold_impl(
     model_name,
     texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
     model_dir, labels,
@@ -2529,7 +2566,7 @@ def train_transformer_fold(
         if group_ids_tr is not None:
             epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
         else:
-            perm = np.random.permutation(len(texts_tr))
+            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
             sorted_indices = []
             for m_start in range(0, len(texts_tr), mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
@@ -2754,6 +2791,54 @@ def train_transformer_fold(
 
     return best_val_logits, test_logits
 
+
+def train_transformer_fold(
+    model_name,
+    texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
+    model_dir, labels,
+    device="cuda:0",
+    batch_size=12,
+    grad_accum=1,
+    max_length=448,
+    epochs=3,
+    lr_backbone=1.5e-5,
+    lr_head=1.2e-4,
+    weight_decay=0.01,
+    label_smoothing=0.01,
+    layer_decay=0.95,
+    enable_grad_checkpointing=True,
+    deadline=None,
+    cached_enc_tr=None,
+    cached_enc_va=None,
+    cached_enc_te=None,
+    cached_enc_te_tta=None,
+    cached_tokenizer=None,
+    group_ids_tr=None,
+    use_topic_masking=True,
+    use_sift=True,
+    n_frozen_bottom_layers=4,
+):
+    """Exception-safe wrapper ensuring GPU memory is reclaimed even if a fold aborts mid-epoch."""
+    try:
+        return _train_transformer_fold_impl(
+            model_name, texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
+            device=device, batch_size=batch_size, grad_accum=grad_accum, max_length=max_length,
+            epochs=epochs, lr_backbone=lr_backbone, lr_head=lr_head, weight_decay=weight_decay,
+            label_smoothing=label_smoothing, layer_decay=layer_decay,
+            enable_grad_checkpointing=enable_grad_checkpointing, deadline=deadline,
+            cached_enc_tr=cached_enc_tr, cached_enc_va=cached_enc_va, cached_enc_te=cached_enc_te,
+            cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
+            group_ids_tr=group_ids_tr, use_topic_masking=use_topic_masking, use_sift=use_sift,
+            n_frozen_bottom_layers=n_frozen_bottom_layers,
+        )
+    finally:
+        gc.collect()
+        if torch.cuda.is_available() and str(device).startswith("cuda"):
+            dev_idx = torch.device(device).index if torch.device(device).index is not None else 0
+            with torch.cuda.device(dev_idx):
+                torch.cuda.synchronize(dev_idx)
+                torch.cuda.empty_cache()
+
 def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels, group_ids_tr=None, **kwargs):
     kwargs.setdefault("batch_size", 16)
     kwargs.setdefault("grad_accum", 1)
@@ -2785,7 +2870,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
 
 # --- 8. QWEN 3 8B / 2.5 7B LORA FINE-TUNE PER FOLD (DUAL GPU) ---
 
-def train_qwen_lora_fold(
+def _train_qwen_lora_fold_impl(
     texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
     model_dir, labels,
     batch_size=16,
@@ -2867,9 +2952,14 @@ def train_qwen_lora_fold(
                         aligned_map[""] = v
                 backbone = dispatch_model(backbone, device_map=aligned_map)
             except Exception as e:
-                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; moving to GPU", flush=True)
-                if cuda_ok:
-                    backbone = backbone.to("cuda:0")
+                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; retrying balanced auto map", flush=True)
+                try:
+                    backbone = dispatch_model(backbone, device_map="auto")
+                except Exception as e2:
+                    if n_gpus < 2 and cuda_ok:
+                        backbone = backbone.to("cuda:0")
+                    else:
+                        raise RuntimeError(f"Dual-GPU Qwen dispatch failed across {n_gpus} GPUs: {e2}") from e2
         elif cuda_ok:
             backbone = backbone.to("cuda:0")
 
@@ -3025,7 +3115,7 @@ def train_qwen_lora_fold(
         if group_ids_tr is not None:
             epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
         else:
-            perm = np.random.permutation(len(texts_tr))
+            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
             sorted_indices = []
             for m_start in range(0, len(texts_tr), mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
@@ -3288,6 +3378,61 @@ def train_qwen_lora_fold(
 
     return best_val_logits, test_logits
 
+
+def train_qwen_lora_fold(
+    texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
+    model_dir, labels,
+    batch_size=16,
+    grad_accum=1,
+    max_length=448,
+    epochs=3,
+    lr_lora=1.5e-4,
+    lr_head=3.5e-4,
+    lora_r=48,
+    lora_alpha=96,
+    lora_dropout=0.08,
+    deadline=None,
+    cached_enc_tr=None,
+    cached_enc_va=None,
+    cached_enc_te=None,
+    cached_enc_te_tta=None,
+    cached_tokenizer=None,
+    group_ids_tr=None,
+    retain_backbone: bool = False,
+):
+    """Exception-safe wrapper guaranteeing Qwen hooks & GPU allocations are cleanly offloaded/freed on abort."""
+    try:
+        return _train_qwen_lora_fold_impl(
+            texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
+            batch_size=batch_size, grad_accum=grad_accum, max_length=max_length, epochs=epochs,
+            lr_lora=lr_lora, lr_head=lr_head, lora_r=lora_r, lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout, deadline=deadline, cached_enc_tr=cached_enc_tr,
+            cached_enc_va=cached_enc_va, cached_enc_te=cached_enc_te,
+            cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
+            group_ids_tr=group_ids_tr, retain_backbone=retain_backbone,
+        )
+    except Exception:
+        if retain_backbone and "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
+            try:
+                from accelerate.hooks import remove_hook_from_submodules
+                cached_bb = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
+                remove_hook_from_submodules(cached_bb)
+                GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = cached_bb.to("cpu")
+            except Exception:
+                GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+                GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        else:
+            GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+            GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        raise
+    finally:
+        gc.collect()
+        if torch.cuda.is_available():
+            for dev_idx in range(torch.cuda.device_count()):
+                with torch.cuda.device(dev_idx):
+                    torch.cuda.synchronize(dev_idx)
+                    torch.cuda.empty_cache()
+
 # --- 9. CONSENSUS BLENDING, CALIBRATION & SINKHORN BALANCING ---
 
 def fit_temperature(margins: np.ndarray, y_true_int: np.ndarray, default_t: float = 1.0) -> float:
@@ -3449,7 +3594,10 @@ def compute_hierarchical_tree_probs(
     w_r = [w / sum_r for w in w_r]
     w_e = [w / sum_e for w in w_e]
 
-    N = p_svm.shape[0]
+    ref_m = next((m for m in models if m is not None), None)
+    if ref_m is None:
+        return np.zeros((0, NUM_CLASSES), dtype=np.float64)
+    N = ref_m.shape[0]
     p_router = np.zeros((N, NUM_CLASSES), dtype=np.float64)
     p_expert = np.zeros((N, NUM_CLASSES), dtype=np.float64)
 
@@ -3481,7 +3629,7 @@ def compute_hierarchical_tree_probs(
 
 
 def quad_rank_blend(
-    svm_m: np.ndarray,
+    svm_m: np.ndarray = None,
     deberta_m: np.ndarray = None,
     qwen_m: np.ndarray = None,
     bge_m: np.ndarray = None,
@@ -3500,7 +3648,7 @@ def quad_rank_blend(
     SVM margins use temp=0.20 to match transformer logit dynamic range and entropy.
     """
     ts, td, tq, tb = temperatures
-    p_svm = margins_to_probs(svm_m, temp=ts)
+    p_svm = margins_to_probs(svm_m, temp=ts) if svm_m is not None else None
     p_deb = margins_to_probs(deberta_m, temp=td) if deberta_m is not None else None
     p_qwen = margins_to_probs(qwen_m, temp=tq) if qwen_m is not None else None
     p_bge = margins_to_probs(bge_m, temp=tb) if bge_m is not None else None
@@ -3529,7 +3677,7 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     Tests hierarchy_alpha in [0.0, 0.20, 0.35, 0.50, 0.65, 0.75, 0.85] with guaranteed monotonic improvement over flat blend.
     """
     best_w = (
-        1.0,
+        1.0 if oof_svm is not None else 0.0,
         1.0 if oof_deb is not None else 0.0,
         1.0 if oof_qwen is not None else 0.0,
         1.0 if oof_bge is not None else 0.0,
@@ -3537,13 +3685,12 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     best_alpha = 0.65
     best_score = -1.0
 
-    valid_mask = ~np.isnan(oof_svm).any(axis=1)
-    if oof_deb is not None:
-        valid_mask &= ~np.isnan(oof_deb).any(axis=1)
-    if oof_bge is not None:
-        valid_mask &= ~np.isnan(oof_bge).any(axis=1)
-    if oof_qwen is not None:
-        valid_mask &= ~np.isnan(oof_qwen).any(axis=1)
+    streams = [s for s in (oof_svm, oof_deb, oof_bge, oof_qwen) if s is not None]
+    if not streams:
+        return best_w, best_alpha, 0.0
+    valid_mask = np.ones(len(streams[0]), dtype=bool)
+    for s in streams:
+        valid_mask &= ~np.isnan(s).any(axis=1)
 
     if not np.any(valid_mask):
         return best_w, best_alpha, 0.0
@@ -3553,12 +3700,12 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     y_val = y_true_int[valid_mask]
 
     ts, td, tq, tb = temperatures
-    svm_p = margins_to_probs(oof_svm[valid_mask], temp=ts)
+    svm_p = margins_to_probs(oof_svm[valid_mask], temp=ts) if oof_svm is not None else None
     deb_p = margins_to_probs(oof_deb[valid_mask], temp=td) if oof_deb is not None else None
     qwn_p = margins_to_probs(oof_qwen[valid_mask], temp=tq) if oof_qwen is not None else None
     bge_p = margins_to_probs(oof_bge[valid_mask], temp=tb) if oof_bge is not None else None
 
-    s_cands = [0.2, 0.5, 0.8, 1.0, 1.2, 1.5]
+    s_cands = [0.2, 0.5, 0.8, 1.0, 1.2, 1.5] if svm_p is not None else [0.0]
     d_cands = [0.0, 0.2, 0.5, 0.8, 1.0, 1.2, 1.5] if deb_p is not None else [0.0]
     q_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5] if qwn_p is not None else [0.0]
     b_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0] if bge_p is not None else [0.0]
@@ -3566,15 +3713,16 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     # Precompute invariant Stage 1 Router family probabilities across the entire grid search
     r_weights = (0.30, 0.25, 0.30, 0.15)
     r_models = [svm_p, deb_p, qwn_p, bge_p]
+    ref_p = next(m for m in r_models if m is not None)
     w_r_eff = [w if m is not None else 0.0 for w, m in zip(r_weights, r_models)]
     sum_r = max(sum(w_r_eff), 1e-6)
-    p_router = np.zeros_like(svm_p)
+    p_router = np.zeros_like(ref_p)
     for m, wr in zip(r_models, w_r_eff):
         if m is not None:
             p_router += (wr / sum_r) * m
     p_router /= np.maximum(p_router.sum(axis=-1, keepdims=True), 1e-12)
     p_family_dict = {fam: np.sum(p_router[:, idxs], axis=-1, keepdims=True) for fam, idxs in FAMILY_TO_INDICES.items()}
-    N_val, K_cls = svm_p.shape
+    N_val, K_cls = ref_p.shape
     do_sinkhorn = N_val >= 36
 
     def _fast_bal_acc(y_true_arr, pred_arr, safe_counts_arr, n_present_cls):
@@ -3587,9 +3735,9 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     safe_counts = np.where(present, raw_counts, 1.0)
 
     # Preallocate reusable buffers to eliminate heap churn across 2,352 grid steps
-    p_expert = np.empty_like(svm_p)
-    p_hier = np.empty_like(svm_p)
-    blend_p = np.empty_like(svm_p)
+    p_expert = np.empty_like(ref_p)
+    p_hier = np.empty_like(ref_p)
+    blend_p = np.empty_like(ref_p)
     target_col = np.full(K_cls, N_val / K_cls, dtype=np.float64)
     ones_N = np.ones(N_val, dtype=np.float64)
     multi_fams = [(idxs, p_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) > 1]
@@ -4078,16 +4226,23 @@ class DSU:
 
 def make_prompt_groups(df):
     """DSU to ensure identical texts across different prompts never cross folds."""
-    prompt_col = df["prompt_id"] if "prompt_id" in df.columns else pd.Series(np.arange(len(df)), index=df.index)
-    dsu = DSU(prompt_col.unique())
+    if "prompt_id" in df.columns:
+        raw_pids = df["prompt_id"].tolist()
+        prompt_vals = [
+            f"__missing_pid_{i}" if (p is None or pd.isna(p) or str(p).strip() == "") else str(p)
+            for i, p in enumerate(raw_pids)
+        ]
+    else:
+        prompt_vals = [f"__row_{i}" for i in range(len(df))]
+    dsu = DSU(set(prompt_vals))
     seen = {}
-    for pid, text in zip(prompt_col, df["text"]):
+    for pid, text in zip(prompt_vals, df["text"]):
         h = hashlib.sha256(" ".join(str(text).split()).encode()).hexdigest()
         if h in seen:
             dsu.union(pid, seen[h])
         else:
             seen[h] = pid
-    return np.array([dsu.find(p) for p in prompt_col])
+    return np.array([dsu.find(p) for p in prompt_vals])
 
 
 # --- 11. SUBMISSION VALIDATION ---
@@ -4132,7 +4287,7 @@ def run_quad_ensemble():
     seed_everything(42)
 
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"id": str, "prompt_id": str})
-    test_df = pd.read_csv(data_dir / "test.csv", dtype={"id": str})
+    test_df = pd.read_csv(data_dir / "test.csv", dtype={"id": str}, keep_default_na=False)
     train_df["text"] = train_df["text"].fillna("")
     test_df["text"] = test_df["text"].fillna("")
 
@@ -4603,31 +4758,33 @@ def run_quad_ensemble():
         # ── Safe Incremental Submission Checkpoint ────────────
         # Guarantees a fully valid, competition-compliant submission.parquet exists on disk after EVERY fold
         try:
-            n_test = len(texts_test)
-            interim_svm_m = np.mean(test_svm_folds, axis=0) if test_svm_folds else np.zeros((n_test, NUM_CLASSES))
+            interim_svm_m = np.mean(test_svm_folds, axis=0) if test_svm_folds else None
             interim_deb_m = np.mean(test_deb_folds, axis=0) if test_deb_folds else None
             interim_bge_m = np.mean(test_bge_folds, axis=0) if test_bge_folds else None
             interim_qwen_m = np.mean(test_qwen_folds, axis=0) if test_qwen_folds else None
 
-            interim_weights = (
-                1.0,
-                1.0 if interim_deb_m is not None else 0.0,
-                1.0 if interim_qwen_m is not None else 0.0,
-                1.0 if interim_bge_m is not None else 0.0,
-            )
-            interim_preds_idx = quad_rank_blend(
-                interim_svm_m, interim_deb_m, interim_qwen_m, interim_bge_m,
-                weights=interim_weights,
-                temperatures=(0.20, 1.2, 1.5, 1.2),
-                balance_test=True,
-                apply_family_gating=True,
-            )
-            validate_and_save_submission(
-                test_df["id"].tolist(),
-                [LABELS[i] for i in interim_preds_idx],
-                working_dir / "submission.parquet",
-            )
-            print(f"  [Safety Checkpoint] Incremental submission.parquet saved after Fold {fold+1}/{n_splits} [OK]", flush=True)
+            if any(m is not None for m in (interim_svm_m, interim_deb_m, interim_bge_m, interim_qwen_m)):
+                interim_weights = (
+                    1.0 if interim_svm_m is not None else 0.0,
+                    1.0 if interim_deb_m is not None else 0.0,
+                    1.0 if interim_qwen_m is not None else 0.0,
+                    1.0 if interim_bge_m is not None else 0.0,
+                )
+                interim_preds_idx = quad_rank_blend(
+                    interim_svm_m, interim_deb_m, interim_qwen_m, interim_bge_m,
+                    weights=interim_weights,
+                    temperatures=(0.20, 1.2, 1.5, 1.2),
+                    balance_test=True,
+                    apply_family_gating=True,
+                )
+                validate_and_save_submission(
+                    test_df["id"].tolist(),
+                    [LABELS[i] for i in interim_preds_idx],
+                    working_dir / "submission.parquet",
+                )
+                print(f"  [Safety Checkpoint] Incremental submission.parquet saved after Fold {fold+1}/{n_splits} [OK]", flush=True)
+            else:
+                print(f"  [Safety Checkpoint] No completed fold test logits yet at Fold {fold+1}/{n_splits}; retaining Step 1 baseline submission.parquet.", flush=True)
         except Exception as e:
             import traceback
             print(f"  [Safety Checkpoint] Warning during interim submission write: {e}", flush=True)
@@ -4650,17 +4807,22 @@ def run_quad_ensemble():
     print("STEP 3: OUT-OF-FOLD EVALUATION & BLEND OPTIMIZATION", flush=True)
     print("=" * 65, flush=True)
 
-    eval_mask = ~np.isnan(oof_svm[:, 0])
-    y_eval = y_true[eval_mask]
-
-    svm_score = balanced_accuracy_score(y_eval, [LABELS[i] for i in np.argmax(oof_svm[eval_mask], axis=1)])
-    print(f"  CPU Dual-Linear: {svm_score*100:.2f}%", flush=True)
+    eval_mask = ~np.isnan(oof_svm).any(axis=1) if oof_svm is not None else np.zeros(n_train, dtype=bool)
+    if np.any(eval_mask) and bool(test_svm_folds):
+        y_eval = y_true[eval_mask]
+        svm_score = balanced_accuracy_score(y_eval, [LABELS[i] for i in np.argmax(oof_svm[eval_mask], axis=1)])
+        print(f"  CPU Dual-Linear: {svm_score*100:.2f}%", flush=True)
+    else:
+        oof_svm = None
+        test_svm_folds = []
+        svm_score = 0.0
+        print("  CPU Dual-Linear: (skipped / no valid folds)", flush=True)
 
     # Universal Neural Stream Quality Gate (relative to CPU baseline)
     min_acceptable_score = max(2.0 / NUM_CLASSES, 0.35 * svm_score)
 
-    if oof_deb is not None and np.any(~np.isnan(oof_deb[:, 0])):
-        deb_mask = ~np.isnan(oof_deb[:, 0])
+    if oof_deb is not None and np.any(~np.isnan(oof_deb).any(axis=1)) and bool(test_deb_folds):
+        deb_mask = ~np.isnan(oof_deb).any(axis=1)
         deb_score = balanced_accuracy_score(y_true[deb_mask], [LABELS[i] for i in np.argmax(oof_deb[deb_mask], axis=1)])
         if deb_score < min_acceptable_score:
             print(f"  [DeBERTa FT] Warning: OOF score ({deb_score*100:.2f}%) below minimum quality threshold ({min_acceptable_score*100:.2f}%). Dropping stream from blend.", flush=True)
@@ -4670,10 +4832,11 @@ def run_quad_ensemble():
             print(f"  DeBERTa FT:      {deb_score*100:.2f}% (folds evaluated: {np.sum(deb_mask)//max(n_train//n_splits, 1)}/{n_splits})", flush=True)
     else:
         oof_deb = None
+        test_deb_folds = []
         print("  DeBERTa FT:      (skipped)", flush=True)
 
-    if oof_bge is not None and np.any(~np.isnan(oof_bge[:, 0])):
-        bge_mask = ~np.isnan(oof_bge[:, 0])
+    if oof_bge is not None and np.any(~np.isnan(oof_bge).any(axis=1)) and bool(test_bge_folds):
+        bge_mask = ~np.isnan(oof_bge).any(axis=1)
         bge_score = balanced_accuracy_score(y_true[bge_mask], [LABELS[i] for i in np.argmax(oof_bge[bge_mask], axis=1)])
         if bge_score < min_acceptable_score:
             print(f"  [BGE FT] Warning: OOF score ({bge_score*100:.2f}%) below minimum quality threshold ({min_acceptable_score*100:.2f}%). Dropping stream from blend.", flush=True)
@@ -4683,9 +4846,10 @@ def run_quad_ensemble():
             print(f"  BGE FT:          {bge_score*100:.2f}% (folds evaluated: {np.sum(bge_mask)//max(n_train//n_splits, 1)}/{n_splits})", flush=True)
     else:
         oof_bge = None
+        test_bge_folds = []
         print("  BGE FT:          (skipped)", flush=True)
 
-    if oof_qwen is not None and np.any(~np.isnan(oof_qwen).any(axis=1)):
+    if oof_qwen is not None and np.any(~np.isnan(oof_qwen).any(axis=1)) and bool(test_qwen_folds):
         qwen_mask = ~np.isnan(oof_qwen).any(axis=1)
         qwen_score = balanced_accuracy_score(y_true[qwen_mask], [LABELS[i] for i in np.argmax(oof_qwen[qwen_mask], axis=1)])
         if qwen_score < min_acceptable_score:
@@ -4696,7 +4860,14 @@ def run_quad_ensemble():
             print(f"  Qwen LoRA:       {qwen_score*100:.2f}% (folds evaluated: {np.sum(qwen_mask)//max(n_train//n_splits, 1)}/{n_splits})", flush=True)
     else:
         oof_qwen = None
+        test_qwen_folds = []
         print("  Qwen LoRA:       (skipped)", flush=True)
+
+    if all(s is None for s in (oof_svm, oof_deb, oof_bge, oof_qwen)):
+        print("  [Ensemble Warning] All CV streams produced empty/rejected OOF results; preserving Step 1 baseline submission.parquet.", flush=True)
+        elapsed = time.perf_counter() - start_time
+        print(f"\nTotal time: {elapsed:.1f}s ({elapsed/60:.2f} min)", flush=True)
+        return
 
     # Automated Temperature Calibration (minimizing NLL on valid OOF rows)
     lbl2id = {l: i for i, l in enumerate(LABELS)}
@@ -4710,12 +4881,12 @@ def run_quad_ensemble():
 
     # ── Transductive Same-Prompt Neighbor Centering (OOF Graph & Monotonic Tuning) ──
     oof_centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22).fit_graph(X_train_all)
-    eta_svm = oof_centerer.optimize_eta(oof_svm, y_true_int)
+    eta_svm = oof_centerer.optimize_eta(oof_svm, y_true_int) if oof_svm is not None else 0.0
     eta_deb = oof_centerer.optimize_eta(oof_deb, y_true_int) if oof_deb is not None else 0.0
     eta_qwn = oof_centerer.optimize_eta(oof_qwen, y_true_int) if oof_qwen is not None else 0.0
     eta_bge = oof_centerer.optimize_eta(oof_bge, y_true_int) if oof_bge is not None else 0.0
     print(f"  [Prompt Centering] Optimal per-stream etas: SVM={eta_svm:.2f} DeBERTa={eta_deb:.2f} Qwen={eta_qwn:.2f} BGE={eta_bge:.2f}", flush=True)
-    if eta_svm > 0: oof_svm = oof_centerer.transform(oof_svm, eta=eta_svm)
+    if oof_svm is not None and eta_svm > 0: oof_svm = oof_centerer.transform(oof_svm, eta=eta_svm)
     if oof_deb is not None and eta_deb > 0: oof_deb = oof_centerer.transform(oof_deb, eta=eta_deb)
     if oof_qwen is not None and eta_qwn > 0: oof_qwen = oof_centerer.transform(oof_qwen, eta=eta_qwn)
     if oof_bge is not None and eta_bge > 0: oof_bge = oof_centerer.transform(oof_bge, eta=eta_bge)
@@ -4745,7 +4916,7 @@ def run_quad_ensemble():
         print(f"  [Blend Tuning] Error during blend optimization: {e}", flush=True)
         traceback.print_exc()
         best_w = (
-            1.0,
+            1.0 if (oof_svm is not None and test_svm_folds) else 0.0,
             1.0 if (oof_deb is not None and test_deb_folds) else 0.0,
             1.0 if (oof_qwen is not None and test_qwen_folds) else 0.0,
             1.0 if (oof_bge is not None and test_bge_folds) else 0.0,
@@ -4757,7 +4928,7 @@ def run_quad_ensemble():
     meta_combiner = None
     try:
         raw_oof_streams = [oof_svm, oof_deb, oof_qwen, oof_bge]
-        avail_streams = [s for s in raw_oof_streams if s is not None and np.any(~np.isnan(s[:, 0]))]
+        avail_streams = [s for s in raw_oof_streams if s is not None and np.any(~np.isnan(s).any(axis=1))]
         if len(avail_streams) >= 2:
             print("=" * 65, flush=True)
             print("FITTING CPU GRADIENT META-COMBINER (L-BFGS Matrix + Dynamic Entropy Gate)", flush=True)
@@ -4767,10 +4938,10 @@ def run_quad_ensemble():
                 calibrate_logits(oof_qwen, temp=T_qwn) if oof_qwen is not None else None,
                 calibrate_logits(oof_bge, temp=T_bge) if oof_bge is not None else None,
             ]
-            valid_oof_mask = ~np.isnan(oof_svm[:, 0])
+            valid_oof_mask = np.ones(n_train, dtype=bool)
             for s in calib_oof:
                 if s is not None:
-                    valid_oof_mask = valid_oof_mask & ~np.isnan(s[:, 0])
+                    valid_oof_mask = valid_oof_mask & ~np.isnan(s).any(axis=1)
 
             if np.sum(valid_oof_mask) >= 36:
                 y_meta = y_true_int[valid_oof_mask]
@@ -4797,17 +4968,15 @@ def run_quad_ensemble():
         from sklearn.linear_model import RidgeClassifier
         from sklearn.model_selection import cross_val_predict
         # Compute mask directly from raw OOF arrays before margins_to_probs replaces NaNs
-        raw_streams = [oof_svm]
-        if oof_deb is not None: raw_streams.append(oof_deb)
-        if oof_qwen is not None: raw_streams.append(oof_qwen)
-        if oof_bge is not None: raw_streams.append(oof_bge)
+        raw_streams = [s for s in (oof_svm, oof_deb, oof_qwen, oof_bge) if s is not None]
         if len(raw_streams) > 1:
             stack_mask = ~np.isnan(raw_streams[0]).any(axis=1)
             for raw_st in raw_streams[1:]:
                 stack_mask = stack_mask & ~np.isnan(raw_st).any(axis=1)
             if np.any(stack_mask):
                 y_stack = y_true_int[stack_mask]
-                avail_probs = [margins_to_probs(oof_svm[stack_mask], temp=T_svm)]
+                avail_probs = []
+                if oof_svm is not None: avail_probs.append(margins_to_probs(oof_svm[stack_mask], temp=T_svm))
                 if oof_deb is not None: avail_probs.append(margins_to_probs(oof_deb[stack_mask], temp=T_deb))
                 if oof_qwen is not None: avail_probs.append(margins_to_probs(oof_qwen[stack_mask], temp=T_qwn))
                 if oof_bge is not None: avail_probs.append(margins_to_probs(oof_bge[stack_mask], temp=T_bge))
@@ -4824,15 +4993,14 @@ def run_quad_ensemble():
         print("=" * 65, flush=True)
         print("STEP 4: COMPUTING BAGGED TEST PREDICTIONS & FINAL SUBMISSION", flush=True)
         print("=" * 65, flush=True)
-        n_test = len(texts_test)
-        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm_uncentered) if test_svm_folds else np.zeros((n_test, NUM_CLASSES))
-        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb_uncentered)
-        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge_uncentered)
-        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen_uncentered)
+        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm_uncentered) if (test_svm_folds and oof_svm_uncentered is not None) else None
+        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb_uncentered) if (test_deb_folds and oof_deb_uncentered is not None) else None
+        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge_uncentered) if (test_bge_folds and oof_bge_uncentered is not None) else None
+        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen_uncentered) if (test_qwen_folds and oof_qwen_uncentered is not None) else None
 
         # Transductive prompt-topic centering on unseen test passages using learned per-stream OOF etas
         test_centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22).fit_graph(X_test_all)
-        if eta_svm > 0: test_svm_m = test_centerer.transform(test_svm_m, eta=eta_svm)
+        if test_svm_m is not None and eta_svm > 0: test_svm_m = test_centerer.transform(test_svm_m, eta=eta_svm)
         if test_deb_m is not None and eta_deb > 0: test_deb_m = test_centerer.transform(test_deb_m, eta=eta_deb)
         if test_bge_m is not None and eta_bge > 0: test_bge_m = test_centerer.transform(test_bge_m, eta=eta_bge)
         if test_qwen_m is not None and eta_qwn > 0: test_qwen_m = test_centerer.transform(test_qwen_m, eta=eta_qwn)
@@ -4846,7 +5014,7 @@ def run_quad_ensemble():
                     calibrate_logits(test_bge_m, temp=T_bge) if test_bge_m is not None else None,
                 ]
                 test_probs = meta_combiner.predict_proba(calib_test)
-                if np.allclose(test_probs[0], 1.0 / NUM_CLASSES, atol=1e-4):
+                if np.allclose(test_probs, 1.0 / NUM_CLASSES, atol=1e-4):
                     raise ValueError("Meta-Combiner produced uniform fallback distribution; switching to Quad-Rank blend.")
                 if len(test_probs) >= 36:
                     test_probs = sinkhorn_knopp_balance(test_probs)

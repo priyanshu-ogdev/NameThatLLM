@@ -1247,6 +1247,8 @@ class IntraFamilyCliqueSpecialist(BaseEstimator):
                 continue
             X_fam = X[fam_mask]
             y_fam = y_arr[fam_mask]
+            if len(np.unique(y_fam)) < 2:
+                continue
             w_fam = sample_weight[fam_mask] if sample_weight is not None else None
             if w_fam is not None and w_fam.sum() > 0:
                 w_fam = w_fam * (len(w_fam) / w_fam.sum())
@@ -1340,6 +1342,10 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
         if sp.issparse(X):
             raise TypeError("StyleInvariantSubspaceProjector must be applied strictly to dense matrices to prevent RAM densification.")
         X_arr = np.asarray(X, dtype=np.float32)
+        if not np.all(np.isfinite(X_arr)):
+            X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
+        if X_arr.shape[0] < 2:
+            return self
         self.mean_ = X_arr.mean(axis=0, keepdims=True)
         X_c = X_arr - self.mean_
 
@@ -1379,9 +1385,11 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
         return self
 
     def transform(self, X: np.ndarray) -> np.ndarray:
-        if self.U_topic_ is None or self.mean_ is None:
-            return X
         X_arr = np.asarray(X, dtype=np.float32)
+        if not np.all(np.isfinite(X_arr)):
+            X_arr = np.nan_to_num(X_arr, nan=0.0, posinf=0.0, neginf=0.0)
+        if self.U_topic_ is None or self.mean_ is None:
+            return X_arr
         X_c = X_arr - self.mean_
         topic_proj = (X_c @ self.U_topic_) @ self.U_topic_.T
         return (X_c - self.attenuation * topic_proj) + self.mean_
@@ -2048,32 +2056,47 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        all_logits = []
-        eval_bs = 32  # Memory-safe for Tesla T4 under L=448
         cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
         pooler = get_model_pooler(model)
-        with inference_context():
-            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
-                for start in range(0, n_samples, eval_bs):
-                    end = min(start + eval_bs, n_samples)
-                    batch_indices = sort_idx[start:end]
-                    sl = {
-                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                    }
-                    if "token_type_ids" in enc:
-                        sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
-                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                    kw = {
-                        "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
-                        "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
-                    }
-                    if "token_type_ids" in padded:
-                        kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                        set_model_pooler_mask(model, kw["attention_mask"])
-                        logits = model(**kw).logits
-                    all_logits.append(logits.float().cpu().numpy())
+        eval_bs = 32  # Memory-safe for Tesla T4 under L=448 (with OOM halving backoff)
+        while True:
+            all_logits = []
+            try:
+                with inference_context():
+                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+                        for start in range(0, n_samples, eval_bs):
+                            end = min(start + eval_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            if "token_type_ids" in enc:
+                                sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            kw = {
+                                "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
+                                "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
+                            }
+                            if "token_type_ids" in padded:
+                                kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
+                            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                                set_model_pooler_mask(model, kw["attention_mask"])
+                                logits = model(**kw).logits
+                            all_logits.append(logits.float().cpu().numpy())
+                break
+            except torch.cuda.OutOfMemoryError:
+                set_model_pooler_mask(model, None)
+                if pooler is not None:
+                    pooler._extra_layers = None
+                all_logits.clear()
+                gc.collect()
+                if cuda_ok:
+                    torch.cuda.empty_cache()
+                if eval_bs <= 1:
+                    raise
+                eval_bs = max(eval_bs // 2, 1)
+                print(f"  [Eval] CUDA OOM at eval_bs={eval_bs * 2}; retrying with eval_bs={eval_bs}...", flush=True)
         set_model_pooler_mask(model, None)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
@@ -2169,45 +2192,59 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        all_logits = []
         inf_bs = 16
         autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-        with inference_context():
-            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
-                for start in range(0, n_samples, inf_bs):
-                    end = min(start + inf_bs, n_samples)
-                    batch_indices = sort_idx[start:end]
-                    sl = {
-                        "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                        "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                    }
-                    padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                    batch_kwargs = {
-                        "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
-                        "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
-                    }
-                    with autocast_ctx:
-                        out = backbone(**batch_kwargs, output_hidden_states=False)
-                        if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
-                            h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
-                        else:
-                            h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                        captured_hs.clear()
-                        del out
-                        if isinstance(head, SpikeAndGapHierarchicalHead):
-                            logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
-                        else:
-                            last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                            if getattr(tokenizer, "padding_side", "left") == "left":
-                                pooled = last_h[:, -1, :].float()
-                            else:
-                                attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                pooled = last_h[batch_idx, seq_lens].float()
-                            logits = head(pooled.to(head_dev)).float().cpu().numpy()
-                        del h_input
-                    all_logits.append(logits)
+        while True:
+            all_logits = []
+            try:
+                with inference_context():
+                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                        for start in range(0, n_samples, inf_bs):
+                            end = min(start + inf_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            batch_kwargs = {
+                                "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
+                                "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
+                            }
+                            with autocast_ctx:
+                                out = backbone(**batch_kwargs, output_hidden_states=False)
+                                if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
+                                    h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
+                                else:
+                                    h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                                captured_hs.clear()
+                                del out
+                                if isinstance(head, SpikeAndGapHierarchicalHead):
+                                    logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
+                                else:
+                                    last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                                    if getattr(tokenizer, "padding_side", "left") == "left":
+                                        pooled = last_h[:, -1, :].float()
+                                    else:
+                                        attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                        seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                        batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                        pooled = last_h[batch_idx, seq_lens].float()
+                                    logits = head(pooled.to(head_dev)).float().cpu().numpy()
+                                del h_input
+                            all_logits.append(logits)
+                break
+            except torch.cuda.OutOfMemoryError:
+                all_logits.clear()
+                gc.collect()
+                if cuda_ok:
+                    for gi in range(torch.cuda.device_count()):
+                        with torch.cuda.device(gi):
+                            torch.cuda.empty_cache()
+                if inf_bs <= 1:
+                    raise
+                inf_bs = max(inf_bs // 2, 1)
+                print(f"  [Qwen Eval] CUDA OOM at inf_bs={inf_bs * 2}; retrying with inf_bs={inf_bs}...", flush=True)
         sorted_logits = np.concatenate(all_logits, axis=0)
         inv_idx = np.empty_like(sort_idx)
         inv_idx[sort_idx] = np.arange(len(sort_idx))
@@ -2247,7 +2284,7 @@ def get_cosine_schedule_with_warmup_and_min_lr(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def train_transformer_fold(
+def _train_transformer_fold_impl(
     model_name,
     texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
     model_dir, labels,
@@ -2529,7 +2566,7 @@ def train_transformer_fold(
         if group_ids_tr is not None:
             epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
         else:
-            perm = np.random.permutation(len(texts_tr))
+            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
             sorted_indices = []
             for m_start in range(0, len(texts_tr), mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
@@ -2754,6 +2791,54 @@ def train_transformer_fold(
 
     return best_val_logits, test_logits
 
+
+def train_transformer_fold(
+    model_name,
+    texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
+    model_dir, labels,
+    device="cuda:0",
+    batch_size=12,
+    grad_accum=1,
+    max_length=448,
+    epochs=3,
+    lr_backbone=1.5e-5,
+    lr_head=1.2e-4,
+    weight_decay=0.01,
+    label_smoothing=0.01,
+    layer_decay=0.95,
+    enable_grad_checkpointing=True,
+    deadline=None,
+    cached_enc_tr=None,
+    cached_enc_va=None,
+    cached_enc_te=None,
+    cached_enc_te_tta=None,
+    cached_tokenizer=None,
+    group_ids_tr=None,
+    use_topic_masking=True,
+    use_sift=True,
+    n_frozen_bottom_layers=4,
+):
+    """Exception-safe wrapper ensuring GPU memory is reclaimed even if a fold aborts mid-epoch."""
+    try:
+        return _train_transformer_fold_impl(
+            model_name, texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
+            device=device, batch_size=batch_size, grad_accum=grad_accum, max_length=max_length,
+            epochs=epochs, lr_backbone=lr_backbone, lr_head=lr_head, weight_decay=weight_decay,
+            label_smoothing=label_smoothing, layer_decay=layer_decay,
+            enable_grad_checkpointing=enable_grad_checkpointing, deadline=deadline,
+            cached_enc_tr=cached_enc_tr, cached_enc_va=cached_enc_va, cached_enc_te=cached_enc_te,
+            cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
+            group_ids_tr=group_ids_tr, use_topic_masking=use_topic_masking, use_sift=use_sift,
+            n_frozen_bottom_layers=n_frozen_bottom_layers,
+        )
+    finally:
+        gc.collect()
+        if torch.cuda.is_available() and str(device).startswith("cuda"):
+            dev_idx = torch.device(device).index if torch.device(device).index is not None else 0
+            with torch.cuda.device(dev_idx):
+                torch.cuda.synchronize(dev_idx)
+                torch.cuda.empty_cache()
+
 def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels, group_ids_tr=None, **kwargs):
     kwargs.setdefault("batch_size", 16)
     kwargs.setdefault("grad_accum", 1)
@@ -2785,7 +2870,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
 
 # --- 8. QWEN 3 8B / 2.5 7B LORA FINE-TUNE PER FOLD (DUAL GPU) ---
 
-def train_qwen_lora_fold(
+def _train_qwen_lora_fold_impl(
     texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
     model_dir, labels,
     batch_size=16,
@@ -2867,9 +2952,14 @@ def train_qwen_lora_fold(
                         aligned_map[""] = v
                 backbone = dispatch_model(backbone, device_map=aligned_map)
             except Exception as e:
-                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; moving to GPU", flush=True)
-                if cuda_ok:
-                    backbone = backbone.to("cuda:0")
+                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; retrying balanced auto map", flush=True)
+                try:
+                    backbone = dispatch_model(backbone, device_map="auto")
+                except Exception as e2:
+                    if n_gpus < 2 and cuda_ok:
+                        backbone = backbone.to("cuda:0")
+                    else:
+                        raise RuntimeError(f"Dual-GPU Qwen dispatch failed across {n_gpus} GPUs: {e2}") from e2
         elif cuda_ok:
             backbone = backbone.to("cuda:0")
 
@@ -3025,7 +3115,7 @@ def train_qwen_lora_fold(
         if group_ids_tr is not None:
             epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
         else:
-            perm = np.random.permutation(len(texts_tr))
+            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
             sorted_indices = []
             for m_start in range(0, len(texts_tr), mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
@@ -3288,6 +3378,61 @@ def train_qwen_lora_fold(
 
     return best_val_logits, test_logits
 
+
+def train_qwen_lora_fold(
+    texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
+    model_dir, labels,
+    batch_size=16,
+    grad_accum=1,
+    max_length=448,
+    epochs=3,
+    lr_lora=1.5e-4,
+    lr_head=3.5e-4,
+    lora_r=48,
+    lora_alpha=96,
+    lora_dropout=0.08,
+    deadline=None,
+    cached_enc_tr=None,
+    cached_enc_va=None,
+    cached_enc_te=None,
+    cached_enc_te_tta=None,
+    cached_tokenizer=None,
+    group_ids_tr=None,
+    retain_backbone: bool = False,
+):
+    """Exception-safe wrapper guaranteeing Qwen hooks & GPU allocations are cleanly offloaded/freed on abort."""
+    try:
+        return _train_qwen_lora_fold_impl(
+            texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
+            batch_size=batch_size, grad_accum=grad_accum, max_length=max_length, epochs=epochs,
+            lr_lora=lr_lora, lr_head=lr_head, lora_r=lora_r, lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout, deadline=deadline, cached_enc_tr=cached_enc_tr,
+            cached_enc_va=cached_enc_va, cached_enc_te=cached_enc_te,
+            cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
+            group_ids_tr=group_ids_tr, retain_backbone=retain_backbone,
+        )
+    except Exception:
+        if retain_backbone and "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
+            try:
+                from accelerate.hooks import remove_hook_from_submodules
+                cached_bb = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
+                remove_hook_from_submodules(cached_bb)
+                GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = cached_bb.to("cpu")
+            except Exception:
+                GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+                GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        else:
+            GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+            GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        raise
+    finally:
+        gc.collect()
+        if torch.cuda.is_available():
+            for dev_idx in range(torch.cuda.device_count()):
+                with torch.cuda.device(dev_idx):
+                    torch.cuda.synchronize(dev_idx)
+                    torch.cuda.empty_cache()
+
 # --- 9. CONSENSUS BLENDING, CALIBRATION & SINKHORN BALANCING ---
 
 def fit_temperature(margins: np.ndarray, y_true_int: np.ndarray, default_t: float = 1.0) -> float:
@@ -3449,7 +3594,10 @@ def compute_hierarchical_tree_probs(
     w_r = [w / sum_r for w in w_r]
     w_e = [w / sum_e for w in w_e]
 
-    N = p_svm.shape[0]
+    ref_m = next((m for m in models if m is not None), None)
+    if ref_m is None:
+        return np.zeros((0, NUM_CLASSES), dtype=np.float64)
+    N = ref_m.shape[0]
     p_router = np.zeros((N, NUM_CLASSES), dtype=np.float64)
     p_expert = np.zeros((N, NUM_CLASSES), dtype=np.float64)
 
@@ -3481,7 +3629,7 @@ def compute_hierarchical_tree_probs(
 
 
 def quad_rank_blend(
-    svm_m: np.ndarray,
+    svm_m: np.ndarray = None,
     deberta_m: np.ndarray = None,
     qwen_m: np.ndarray = None,
     bge_m: np.ndarray = None,
@@ -3500,7 +3648,7 @@ def quad_rank_blend(
     SVM margins use temp=0.20 to match transformer logit dynamic range and entropy.
     """
     ts, td, tq, tb = temperatures
-    p_svm = margins_to_probs(svm_m, temp=ts)
+    p_svm = margins_to_probs(svm_m, temp=ts) if svm_m is not None else None
     p_deb = margins_to_probs(deberta_m, temp=td) if deberta_m is not None else None
     p_qwen = margins_to_probs(qwen_m, temp=tq) if qwen_m is not None else None
     p_bge = margins_to_probs(bge_m, temp=tb) if bge_m is not None else None
@@ -3529,7 +3677,7 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     Tests hierarchy_alpha in [0.0, 0.20, 0.35, 0.50, 0.65, 0.75, 0.85] with guaranteed monotonic improvement over flat blend.
     """
     best_w = (
-        1.0,
+        1.0 if oof_svm is not None else 0.0,
         1.0 if oof_deb is not None else 0.0,
         1.0 if oof_qwen is not None else 0.0,
         1.0 if oof_bge is not None else 0.0,
@@ -3537,13 +3685,12 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     best_alpha = 0.65
     best_score = -1.0
 
-    valid_mask = ~np.isnan(oof_svm).any(axis=1)
-    if oof_deb is not None:
-        valid_mask &= ~np.isnan(oof_deb).any(axis=1)
-    if oof_bge is not None:
-        valid_mask &= ~np.isnan(oof_bge).any(axis=1)
-    if oof_qwen is not None:
-        valid_mask &= ~np.isnan(oof_qwen).any(axis=1)
+    streams = [s for s in (oof_svm, oof_deb, oof_bge, oof_qwen) if s is not None]
+    if not streams:
+        return best_w, best_alpha, 0.0
+    valid_mask = np.ones(len(streams[0]), dtype=bool)
+    for s in streams:
+        valid_mask &= ~np.isnan(s).any(axis=1)
 
     if not np.any(valid_mask):
         return best_w, best_alpha, 0.0
@@ -3553,12 +3700,12 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     y_val = y_true_int[valid_mask]
 
     ts, td, tq, tb = temperatures
-    svm_p = margins_to_probs(oof_svm[valid_mask], temp=ts)
+    svm_p = margins_to_probs(oof_svm[valid_mask], temp=ts) if oof_svm is not None else None
     deb_p = margins_to_probs(oof_deb[valid_mask], temp=td) if oof_deb is not None else None
     qwn_p = margins_to_probs(oof_qwen[valid_mask], temp=tq) if oof_qwen is not None else None
     bge_p = margins_to_probs(oof_bge[valid_mask], temp=tb) if oof_bge is not None else None
 
-    s_cands = [0.2, 0.5, 0.8, 1.0, 1.2, 1.5]
+    s_cands = [0.2, 0.5, 0.8, 1.0, 1.2, 1.5] if svm_p is not None else [0.0]
     d_cands = [0.0, 0.2, 0.5, 0.8, 1.0, 1.2, 1.5] if deb_p is not None else [0.0]
     q_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5] if qwn_p is not None else [0.0]
     b_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0] if bge_p is not None else [0.0]
@@ -3566,15 +3713,16 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     # Precompute invariant Stage 1 Router family probabilities across the entire grid search
     r_weights = (0.30, 0.25, 0.30, 0.15)
     r_models = [svm_p, deb_p, qwn_p, bge_p]
+    ref_p = next(m for m in r_models if m is not None)
     w_r_eff = [w if m is not None else 0.0 for w, m in zip(r_weights, r_models)]
     sum_r = max(sum(w_r_eff), 1e-6)
-    p_router = np.zeros_like(svm_p)
+    p_router = np.zeros_like(ref_p)
     for m, wr in zip(r_models, w_r_eff):
         if m is not None:
             p_router += (wr / sum_r) * m
     p_router /= np.maximum(p_router.sum(axis=-1, keepdims=True), 1e-12)
     p_family_dict = {fam: np.sum(p_router[:, idxs], axis=-1, keepdims=True) for fam, idxs in FAMILY_TO_INDICES.items()}
-    N_val, K_cls = svm_p.shape
+    N_val, K_cls = ref_p.shape
     do_sinkhorn = N_val >= 36
 
     def _fast_bal_acc(y_true_arr, pred_arr, safe_counts_arr, n_present_cls):
@@ -3587,9 +3735,9 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     safe_counts = np.where(present, raw_counts, 1.0)
 
     # Preallocate reusable buffers to eliminate heap churn across 2,352 grid steps
-    p_expert = np.empty_like(svm_p)
-    p_hier = np.empty_like(svm_p)
-    blend_p = np.empty_like(svm_p)
+    p_expert = np.empty_like(ref_p)
+    p_hier = np.empty_like(ref_p)
+    blend_p = np.empty_like(ref_p)
     target_col = np.full(K_cls, N_val / K_cls, dtype=np.float64)
     ones_N = np.ones(N_val, dtype=np.float64)
     multi_fams = [(idxs, p_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) > 1]
@@ -4078,16 +4226,23 @@ class DSU:
 
 def make_prompt_groups(df):
     """DSU to ensure identical texts across different prompts never cross folds."""
-    prompt_col = df["prompt_id"] if "prompt_id" in df.columns else pd.Series(np.arange(len(df)), index=df.index)
-    dsu = DSU(prompt_col.unique())
+    if "prompt_id" in df.columns:
+        raw_pids = df["prompt_id"].tolist()
+        prompt_vals = [
+            f"__missing_pid_{i}" if (p is None or pd.isna(p) or str(p).strip() == "") else str(p)
+            for i, p in enumerate(raw_pids)
+        ]
+    else:
+        prompt_vals = [f"__row_{i}" for i in range(len(df))]
+    dsu = DSU(set(prompt_vals))
     seen = {}
-    for pid, text in zip(prompt_col, df["text"]):
+    for pid, text in zip(prompt_vals, df["text"]):
         h = hashlib.sha256(" ".join(str(text).split()).encode()).hexdigest()
         if h in seen:
             dsu.union(pid, seen[h])
         else:
             seen[h] = pid
-    return np.array([dsu.find(p) for p in prompt_col])
+    return np.array([dsu.find(p) for p in prompt_vals])
 
 
 # --- 11. SUBMISSION VALIDATION ---
@@ -4179,8 +4334,8 @@ def run_dry_run_verifier():
     print(f"  External Dataset:   {ext_path}")
     print(f"  Working Directory:  {working_dir}")
 
-    train_df = pd.read_csv(data_dir / "train.csv")
-    test_df = pd.read_csv(data_dir / "test.csv")
+    train_df = pd.read_csv(data_dir / "train.csv", dtype={"id": str, "prompt_id": str})
+    test_df = pd.read_csv(data_dir / "test.csv", dtype={"id": str}, keep_default_na=False)
     train_df["text"] = train_df["text"].fillna("")
     test_df["text"] = test_df["text"].fillna("")
     print(f"  Full Train: {len(train_df):,} | Full Test: {len(test_df):,}")
@@ -4222,21 +4377,31 @@ def run_dry_run_verifier():
     mini_n_va = min(16, len(train_df) - mini_n_tr)
     if mini_n_va <= 0:
         mini_n_va = mini_n_tr
+        va_start = 0
+    else:
+        va_start = mini_n_tr
     texts_tr = train_df["text"].iloc[:mini_n_tr].tolist()
     y_tr_str = train_df["model"].iloc[:mini_n_tr].tolist()
-    texts_va = train_df["text"].iloc[mini_n_tr:mini_n_tr + mini_n_va].tolist()
-    y_va_str = train_df["model"].iloc[mini_n_tr:mini_n_tr + mini_n_va].tolist()
+    texts_va = train_df["text"].iloc[va_start:va_start + mini_n_va].tolist()
+    y_va_str = train_df["model"].iloc[va_start:va_start + mini_n_va].tolist()
     texts_te = test_df["text"].iloc[:min(10, len(test_df))].tolist()
     print(f"  Smoke Test Slice: {len(texts_tr)} train, {len(texts_va)} val, {len(texts_te)} test passages", flush=True)
 
     # Smoke test upfront token caching (Step 0) & Host RAM Model Cache + TTA Cache Verification
-    print("  Testing Step 0 upfront token caching & Host RAM Model Cache on smoke slice...", flush=True)
-    smoke_caches = precompute_token_caches(texts_tr[:4], texts_te[:4], deberta_dir, bge_dir, qwen_dir, max_length=448)
+    print("  Testing Step 0 upfront token caching & Host RAM Model Cache on full smoke slice...", flush=True)
+    smoke_tr_va = texts_tr + (texts_va if va_start == mini_n_tr else [])
+    smoke_caches = precompute_token_caches(smoke_tr_va, texts_te, deberta_dir, bge_dir, qwen_dir, max_length=448)
     print(f"  RAM Token Caches verified: {list(smoke_caches.keys())} [OK]")
     for m_tag, m_cache in smoke_caches.items():
-        assert "te" in m_cache and "te_tta" in m_cache, f"Token cache for {m_tag} missing te or te_tta"
+        assert "tr" in m_cache and "te" in m_cache and "te_tta" in m_cache, f"Token cache for {m_tag} missing tr, te, or te_tta"
+        assert len(m_cache["tr"]["input_ids"]) == len(smoke_tr_va), f"Token cache tr length mismatch for {m_tag}"
+        assert len(m_cache["te"]["input_ids"]) == len(texts_te), f"Token cache te length mismatch for {m_tag}"
         assert len(m_cache["te"]["input_ids"]) == len(m_cache["te_tta"]["input_ids"]), "te and te_tta sample count mismatch"
-    print("  Stylometric TTA Token Caches (te_tta: 128 head + 320 tail) verified [OK]")
+        m_cache["tr_slice"] = {k: m_cache["tr"][k][:mini_n_tr] for k in m_cache["tr"]}
+        m_cache["va_slice"] = {k: m_cache["tr"][k][va_start:va_start + mini_n_va] for k in m_cache["tr"]}
+        assert len(m_cache["tr_slice"]["input_ids"]) == len(texts_tr)
+        assert len(m_cache["va_slice"]["input_ids"]) == len(texts_va)
+    print("  Stylometric TTA Token Caches (te_tta: 128 head + 320 tail) & split alignment verified [OK]")
 
     GLOBAL_RAM_MODEL_CACHE["_smoke_test_guard"] = torch.zeros((10, 10), dtype=torch.float32)
     assert "_smoke_test_guard" in GLOBAL_RAM_MODEL_CACHE
@@ -4281,8 +4446,8 @@ def run_dry_run_verifier():
     if deberta_dir is not None and cuda_ok:
         deb_smoke_kw = {}
         if "deberta" in smoke_caches:
-            deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr"]
-            deb_smoke_kw["cached_enc_va"] = smoke_caches["deberta"]["tr"]
+            deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr_slice"]
+            deb_smoke_kw["cached_enc_va"] = smoke_caches["deberta"]["va_slice"]
             deb_smoke_kw["cached_enc_te"] = smoke_caches["deberta"]["te"]
             deb_smoke_kw["cached_enc_te_tta"] = smoke_caches["deberta"]["te_tta"]
             deb_smoke_kw["cached_tokenizer"] = smoke_caches["deberta"]["tokenizer"]
@@ -4297,6 +4462,8 @@ def run_dry_run_verifier():
         )
         check_finite_logits(val_deb, "DeBERTa Val")
         check_finite_logits(test_deb, "DeBERTa Test")
+        assert val_deb.shape == (len(texts_va), NUM_CLASSES), "DeBERTa val logits shape mismatch"
+        assert test_deb.shape == (len(texts_te), NUM_CLASSES), "DeBERTa test logits shape mismatch"
         deb_sps = getattr(train_deberta_fold, "last_throughput", 20.0)
         deb_eval_sps = 42.0
     else:
@@ -4331,8 +4498,8 @@ def run_dry_run_verifier():
     if bge_dir is not None and cuda_ok:
         bge_smoke_kw = {}
         if "bge" in smoke_caches:
-            bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr"]
-            bge_smoke_kw["cached_enc_va"] = smoke_caches["bge"]["tr"]
+            bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr_slice"]
+            bge_smoke_kw["cached_enc_va"] = smoke_caches["bge"]["va_slice"]
             bge_smoke_kw["cached_enc_te"] = smoke_caches["bge"]["te"]
             bge_smoke_kw["cached_enc_te_tta"] = smoke_caches["bge"]["te_tta"]
             bge_smoke_kw["cached_tokenizer"] = smoke_caches["bge"]["tokenizer"]
@@ -4347,6 +4514,8 @@ def run_dry_run_verifier():
         )
         check_finite_logits(val_bge, "BGE Val")
         check_finite_logits(test_bge, "BGE Test")
+        assert val_bge.shape == (len(texts_va), NUM_CLASSES), "BGE val logits shape mismatch"
+        assert test_bge.shape == (len(texts_te), NUM_CLASSES), "BGE test logits shape mismatch"
         bge_sps = getattr(train_bge_fold, "last_throughput", 26.0)
         bge_eval_sps = 55.0
     else:
@@ -4427,8 +4596,8 @@ def run_dry_run_verifier():
     if qwen_dir is not None and cuda_ok:
         qwen_smoke_kw = {}
         if "qwen" in smoke_caches:
-            qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr"]
-            qwen_smoke_kw["cached_enc_va"] = smoke_caches["qwen"]["tr"]
+            qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr_slice"]
+            qwen_smoke_kw["cached_enc_va"] = smoke_caches["qwen"]["va_slice"]
             qwen_smoke_kw["cached_enc_te"] = smoke_caches["qwen"]["te"]
             qwen_smoke_kw["cached_enc_te_tta"] = smoke_caches["qwen"]["te_tta"]
             qwen_smoke_kw["cached_tokenizer"] = smoke_caches["qwen"]["tokenizer"]
@@ -4438,10 +4607,21 @@ def run_dry_run_verifier():
             batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=1,
             lora_r=48, lora_alpha=96,
             group_ids_tr=group_ids[:mini_n_tr],
+            retain_backbone=True,
             **qwen_smoke_kw,
         )
         check_finite_logits(val_qwen, "Qwen Val")
         check_finite_logits(test_qwen, "Qwen Test")
+        assert val_qwen.shape == (len(texts_va), NUM_CLASSES), "Qwen val logits shape mismatch"
+        assert test_qwen.shape == (len(texts_te), NUM_CLASSES), "Qwen test logits shape mismatch"
+        assert "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE, "Qwen retain_backbone offload to Host RAM cache failed"
+        GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta_config", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge_config", None)
+        gc.collect()
         qwen_sps = getattr(train_qwen_lora_fold, "last_throughput", 3.2 if is_qwen3 else 3.5)
         qwen_eval_sps = 12.0
     else:
@@ -4480,12 +4660,17 @@ def run_dry_run_verifier():
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
     print("[Check 6/9] Testing CPU Multiview Dual-Linear, Sibling Specialists & Subspace Projector...", flush=True)
-    feature_extractor = build_cpu_feature_extractor(style_weight=0.2)
     all_raw = texts_tr + texts_va + texts_te
+    n_tr = len(texts_tr)
+    n_va = len(texts_va)
+    style_extractor = RichStyleFeatures()
+    V_dense_all = style_extractor.fit_transform(all_raw)
+    feature_extractor = build_cpu_feature_extractor(style_weight=0.2, include_style=False)
+    style_scaler = StandardScaler()
     with threadpool_limits(limits=4):
-        X_all = feature_extractor.fit_transform(all_raw)
-        n_tr = len(texts_tr)
-        n_va = len(texts_va)
+        X_tfidf_all = feature_extractor.fit_transform(all_raw)
+        V_scaled_all = (0.2 * style_scaler.fit_transform(V_dense_all)).astype(np.float32)
+        X_all = sp.hstack([X_tfidf_all, sp.csr_matrix(V_scaled_all)], format="csr")
         X_tr = X_all[:n_tr]
         X_va = X_all[n_tr:n_tr + n_va]
         X_te = X_all[n_tr + n_va:]
@@ -4510,16 +4695,26 @@ def run_dry_run_verifier():
         sparsity = n_zero_coef / clf.svc_2_.coef_.size
         print(f"  [L1 Coordinate Sparsity] {sparsity*100:.1f}% zero weights in svc_2_ (topic-invariant coordinate selection verified) [OK]")
 
-        # IntraFamilyCliqueSpecialist
+        # IntraFamilyCliqueSpecialist with single-pass delta optimization
         clique_specialist = IntraFamilyCliqueSpecialist(alpha_ridge=1.0, beta_refine=0.25, seed=42)
         clique_specialist.fit(X_tr_masked, y_tr_str)
-        val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_masked)
-        test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_masked)
+        y_va_int = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
+        deltas_va = clique_specialist._compute_sibling_deltas(X_va_masked, val_sparse_m.shape[0], val_sparse_m.shape[1])
+        opt_beta = clique_specialist.optimize_beta(val_sparse_m, X_va_masked, y_va_int, precomputed_deltas=deltas_va)
+        val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_masked, beta=opt_beta, precomputed_deltas=deltas_va)
+        test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_masked, beta=opt_beta)
 
-        # Dense Stylometrics & StyleInvariantSubspaceProjector
-        V_dense_tr = RichStyleFeatures().fit_transform(texts_tr)
-        V_dense_va = RichStyleFeatures().fit_transform(texts_va)
-        V_dense_te = RichStyleFeatures().fit_transform(texts_te)
+        # Dense Stylometrics & StyleInvariantSubspaceProjector (single-pass upfront computation matching Step 1)
+        V_dense_tr = V_dense_all[:n_tr]
+        V_dense_va = V_dense_all[n_tr:n_tr + n_va]
+        V_dense_te = V_dense_all[n_tr + n_va:]
+        if ext_df is not None and len(ext_df) >= 8:
+            n_ext_mini = min(16, len(ext_df))
+            V_ext_mini = style_extractor.transform(ext_df["text"].iloc[:n_ext_mini].tolist())
+            w_ext_mini = ext_weights[:n_ext_mini] if ext_weights is not None else np.ones(n_ext_mini, dtype=np.float32)
+            V_ext_aligned = align_external_dense_moments(V_dense_tr, V_ext_mini, w_ext_mini)
+            assert V_ext_aligned.shape == V_ext_mini.shape and np.all(np.isfinite(V_ext_aligned)), "External dense alignment mismatch"
+            print("  [External Moment Alignment] align_external_dense_moments verified [OK]")
         subspace_proj = StyleInvariantSubspaceProjector(n_topic_components=4, attenuation=0.75)
         subspace_proj.fit(V_dense_tr, group_ids[:mini_n_tr], y_labels=y_tr_str)
         V_dense_tr_proj = subspace_proj.transform(V_dense_tr)
@@ -4538,8 +4733,6 @@ def run_dry_run_verifier():
         # Consensus subblend
         p_sparse_va = margins_to_probs(val_sparse_m, temp=0.20)
         p_sparse_te = margins_to_probs(test_sparse_m, temp=0.20)
-        lbl2id = {l: i for i, l in enumerate(LABELS)}
-        y_va_int = np.array([lbl2id[y] for y in y_va_str], dtype=np.int64)
         cpu_alpha = optimize_cpu_subblend(p_sparse_va, p_dense_va, y_va_int)
         p_cpu_va = cpu_alpha * p_sparse_va + (1.0 - cpu_alpha) * p_dense_va
         p_cpu_te = cpu_alpha * p_sparse_te + (1.0 - cpu_alpha) * p_dense_te
@@ -4729,12 +4922,15 @@ def run_dry_run_verifier():
     assert np.isnan(nan_stream).any(), "NaN stream must contain NaN"
     print(f"    -> Healthy stream ({h_acc*100:.1f}%) retained; Chance ({c_acc*100:.1f}%) & NaN streams successfully ejected [OK]")
 
-    # 8.3: Meta-Combiner Uniform Fallback Recovery
+    # 8.3: Meta-Combiner Uniform Fallback Recovery (full-matrix check)
     print("  [8.3] Testing Meta-Combiner degenerate prediction fallback...", flush=True)
     fallback_triggered = False
     try:
         uniform_probs = np.full((10, NUM_CLASSES), 1.0 / NUM_CLASSES)
-        if np.allclose(uniform_probs[0], 1.0 / NUM_CLASSES, atol=1e-4):
+        partial_uncertain = np.eye(NUM_CLASSES)[:10].copy()
+        partial_uncertain[0] = 1.0 / NUM_CLASSES
+        assert not np.allclose(partial_uncertain, 1.0 / NUM_CLASSES, atol=1e-4), "Single uncertain row must not discard valid Meta-Combiner matrix"
+        if np.allclose(uniform_probs, 1.0 / NUM_CLASSES, atol=1e-4):
             raise ValueError("Meta-Combiner produced uniform fallback distribution; switching to Quad-Rank blend.")
     except ValueError:
         fallback_preds = quad_rank_blend(
@@ -4745,15 +4941,18 @@ def run_dry_run_verifier():
         assert len(fallback_preds) == 10
         fallback_triggered = True
     assert fallback_triggered, "Meta-Combiner fallback must succeed"
-    print("    -> Meta-Combiner uniform anomaly caught; Quad-Rank blend fallback verified [OK]")
+    print("    -> Meta-Combiner uniform anomaly caught (and single-row uncertainty preserved); Quad-Rank blend fallback verified [OK]")
 
-    # 8.4: Missing Stream Blend Recovery
+    # 8.4: Missing Stream Blend Recovery (including missing SVM stream)
     print("  [8.4] Testing Missing Stream Blend combinations...", flush=True)
     n_samples_test = 15
     sample_logits = np.random.randn(n_samples_test, NUM_CLASSES)
     # Single stream (CPU only)
     p_single = quad_rank_blend(sample_logits, None, None, None, weights=(1.0, 0.0, 0.0, 0.0))
     assert len(p_single) == n_samples_test
+    # Single stream (DeBERTa only, SVM None)
+    p_deb_only = quad_rank_blend(None, sample_logits, None, None, weights=(0.0, 1.0, 0.0, 0.0))
+    assert len(p_deb_only) == n_samples_test
     # Dual stream (CPU + Qwen)
     p_dual = quad_rank_blend(sample_logits, None, sample_logits, None, weights=(1.0, 0.0, 1.0, 0.0))
     assert len(p_dual) == n_samples_test
@@ -4763,7 +4962,7 @@ def run_dry_run_verifier():
     # Full quad
     p_quad = quad_rank_blend(sample_logits, sample_logits, sample_logits, sample_logits, weights=(1.0, 1.0, 1.0, 1.0))
     assert len(p_quad) == n_samples_test
-    print("    -> All 4 stream combinations (1x, 2x, 3x, 4x) yield valid, non-empty predictions [OK]")
+    print("    -> All stream combinations (SVM-only, Neural-only, 2x, 3x, 4x) yield valid predictions [OK]")
 
     # 8.5: Incremental & Atomic Parquet Submission Write & Validation Guards
     print("  [8.5] Testing Atomic Parquet Write & Schema Validation Guards...", flush=True)
@@ -4799,6 +4998,19 @@ def run_dry_run_verifier():
     assert np.all(np.isfinite(res_logits)), "Transductive logits must remain finite on disconnected graph"
     assert np.allclose(res_logits, isolated_logits, atol=1e-5), "Isolated nodes with 0 neighbors must preserve uncentered logits"
     print("    -> Disconnected / zero-neighbor edge case gracefully preserved uncentered logits [OK]")
+
+    # 8.7: Prompt NaN-ID DSU Grouping & Single-Class Clique Guard
+    print("  [8.7] Testing NaN prompt_id grouping & single-class sibling clique guards...", flush=True)
+    nan_pid_df = pd.DataFrame({
+        "prompt_id": [np.nan, "", "p1", None, "p2"],
+        "text": ["alpha text", "beta text", "gamma text", "alpha text", "delta text"],
+    })
+    nan_groups = make_prompt_groups(nan_pid_df)
+    assert len(nan_groups) == 5, "make_prompt_groups must handle NaN/empty prompt IDs without KeyError"
+    assert nan_groups[0] == nan_groups[3] and nan_groups[0] != nan_groups[1], "Duplicate text must union while distinct empty/NaN prompts stay separate"
+    mono_clique = IntraFamilyCliqueSpecialist().fit(sp.csr_matrix(np.random.randn(25, 12)), np.array([LABELS[0]] * 25))
+    assert len(mono_clique.specialists_) == 0, "Single-class clique slice must be safely skipped"
+    print("    -> NaN prompt_id DSU & single-class clique guards verified [OK]")
     print("  -> Production Exception & Fault-Tolerance Verification PASSED [OK]\n", flush=True)
 
     # ── CHECK 9: Global 9-Hour Feasibility & Wall-Clock Budget Matrix with Throughput Verification ───

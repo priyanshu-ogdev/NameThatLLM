@@ -58,8 +58,8 @@ def run_dry_run_verifier():
     print(f"  External Dataset:   {ext_path}")
     print(f"  Working Directory:  {working_dir}")
 
-    train_df = pd.read_csv(data_dir / "train.csv")
-    test_df = pd.read_csv(data_dir / "test.csv")
+    train_df = pd.read_csv(data_dir / "train.csv", dtype={"id": str, "prompt_id": str})
+    test_df = pd.read_csv(data_dir / "test.csv", dtype={"id": str}, keep_default_na=False)
     train_df["text"] = train_df["text"].fillna("")
     test_df["text"] = test_df["text"].fillna("")
     print(f"  Full Train: {len(train_df):,} | Full Test: {len(test_df):,}")
@@ -101,21 +101,31 @@ def run_dry_run_verifier():
     mini_n_va = min(16, len(train_df) - mini_n_tr)
     if mini_n_va <= 0:
         mini_n_va = mini_n_tr
+        va_start = 0
+    else:
+        va_start = mini_n_tr
     texts_tr = train_df["text"].iloc[:mini_n_tr].tolist()
     y_tr_str = train_df["model"].iloc[:mini_n_tr].tolist()
-    texts_va = train_df["text"].iloc[mini_n_tr:mini_n_tr + mini_n_va].tolist()
-    y_va_str = train_df["model"].iloc[mini_n_tr:mini_n_tr + mini_n_va].tolist()
+    texts_va = train_df["text"].iloc[va_start:va_start + mini_n_va].tolist()
+    y_va_str = train_df["model"].iloc[va_start:va_start + mini_n_va].tolist()
     texts_te = test_df["text"].iloc[:min(10, len(test_df))].tolist()
     print(f"  Smoke Test Slice: {len(texts_tr)} train, {len(texts_va)} val, {len(texts_te)} test passages", flush=True)
 
     # Smoke test upfront token caching (Step 0) & Host RAM Model Cache + TTA Cache Verification
-    print("  Testing Step 0 upfront token caching & Host RAM Model Cache on smoke slice...", flush=True)
-    smoke_caches = precompute_token_caches(texts_tr[:4], texts_te[:4], deberta_dir, bge_dir, qwen_dir, max_length=448)
+    print("  Testing Step 0 upfront token caching & Host RAM Model Cache on full smoke slice...", flush=True)
+    smoke_tr_va = texts_tr + (texts_va if va_start == mini_n_tr else [])
+    smoke_caches = precompute_token_caches(smoke_tr_va, texts_te, deberta_dir, bge_dir, qwen_dir, max_length=448)
     print(f"  RAM Token Caches verified: {list(smoke_caches.keys())} [OK]")
     for m_tag, m_cache in smoke_caches.items():
-        assert "te" in m_cache and "te_tta" in m_cache, f"Token cache for {m_tag} missing te or te_tta"
+        assert "tr" in m_cache and "te" in m_cache and "te_tta" in m_cache, f"Token cache for {m_tag} missing tr, te, or te_tta"
+        assert len(m_cache["tr"]["input_ids"]) == len(smoke_tr_va), f"Token cache tr length mismatch for {m_tag}"
+        assert len(m_cache["te"]["input_ids"]) == len(texts_te), f"Token cache te length mismatch for {m_tag}"
         assert len(m_cache["te"]["input_ids"]) == len(m_cache["te_tta"]["input_ids"]), "te and te_tta sample count mismatch"
-    print("  Stylometric TTA Token Caches (te_tta: 128 head + 320 tail) verified [OK]")
+        m_cache["tr_slice"] = {k: m_cache["tr"][k][:mini_n_tr] for k in m_cache["tr"]}
+        m_cache["va_slice"] = {k: m_cache["tr"][k][va_start:va_start + mini_n_va] for k in m_cache["tr"]}
+        assert len(m_cache["tr_slice"]["input_ids"]) == len(texts_tr)
+        assert len(m_cache["va_slice"]["input_ids"]) == len(texts_va)
+    print("  Stylometric TTA Token Caches (te_tta: 128 head + 320 tail) & split alignment verified [OK]")
 
     GLOBAL_RAM_MODEL_CACHE["_smoke_test_guard"] = torch.zeros((10, 10), dtype=torch.float32)
     assert "_smoke_test_guard" in GLOBAL_RAM_MODEL_CACHE
@@ -160,8 +170,8 @@ def run_dry_run_verifier():
     if deberta_dir is not None and cuda_ok:
         deb_smoke_kw = {}
         if "deberta" in smoke_caches:
-            deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr"]
-            deb_smoke_kw["cached_enc_va"] = smoke_caches["deberta"]["tr"]
+            deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr_slice"]
+            deb_smoke_kw["cached_enc_va"] = smoke_caches["deberta"]["va_slice"]
             deb_smoke_kw["cached_enc_te"] = smoke_caches["deberta"]["te"]
             deb_smoke_kw["cached_enc_te_tta"] = smoke_caches["deberta"]["te_tta"]
             deb_smoke_kw["cached_tokenizer"] = smoke_caches["deberta"]["tokenizer"]
@@ -176,6 +186,8 @@ def run_dry_run_verifier():
         )
         check_finite_logits(val_deb, "DeBERTa Val")
         check_finite_logits(test_deb, "DeBERTa Test")
+        assert val_deb.shape == (len(texts_va), NUM_CLASSES), "DeBERTa val logits shape mismatch"
+        assert test_deb.shape == (len(texts_te), NUM_CLASSES), "DeBERTa test logits shape mismatch"
         deb_sps = getattr(train_deberta_fold, "last_throughput", 20.0)
         deb_eval_sps = 42.0
     else:
@@ -210,8 +222,8 @@ def run_dry_run_verifier():
     if bge_dir is not None and cuda_ok:
         bge_smoke_kw = {}
         if "bge" in smoke_caches:
-            bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr"]
-            bge_smoke_kw["cached_enc_va"] = smoke_caches["bge"]["tr"]
+            bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr_slice"]
+            bge_smoke_kw["cached_enc_va"] = smoke_caches["bge"]["va_slice"]
             bge_smoke_kw["cached_enc_te"] = smoke_caches["bge"]["te"]
             bge_smoke_kw["cached_enc_te_tta"] = smoke_caches["bge"]["te_tta"]
             bge_smoke_kw["cached_tokenizer"] = smoke_caches["bge"]["tokenizer"]
@@ -226,6 +238,8 @@ def run_dry_run_verifier():
         )
         check_finite_logits(val_bge, "BGE Val")
         check_finite_logits(test_bge, "BGE Test")
+        assert val_bge.shape == (len(texts_va), NUM_CLASSES), "BGE val logits shape mismatch"
+        assert test_bge.shape == (len(texts_te), NUM_CLASSES), "BGE test logits shape mismatch"
         bge_sps = getattr(train_bge_fold, "last_throughput", 26.0)
         bge_eval_sps = 55.0
     else:
@@ -306,8 +320,8 @@ def run_dry_run_verifier():
     if qwen_dir is not None and cuda_ok:
         qwen_smoke_kw = {}
         if "qwen" in smoke_caches:
-            qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr"]
-            qwen_smoke_kw["cached_enc_va"] = smoke_caches["qwen"]["tr"]
+            qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr_slice"]
+            qwen_smoke_kw["cached_enc_va"] = smoke_caches["qwen"]["va_slice"]
             qwen_smoke_kw["cached_enc_te"] = smoke_caches["qwen"]["te"]
             qwen_smoke_kw["cached_enc_te_tta"] = smoke_caches["qwen"]["te_tta"]
             qwen_smoke_kw["cached_tokenizer"] = smoke_caches["qwen"]["tokenizer"]
@@ -317,10 +331,21 @@ def run_dry_run_verifier():
             batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=1,
             lora_r=48, lora_alpha=96,
             group_ids_tr=group_ids[:mini_n_tr],
+            retain_backbone=True,
             **qwen_smoke_kw,
         )
         check_finite_logits(val_qwen, "Qwen Val")
         check_finite_logits(test_qwen, "Qwen Test")
+        assert val_qwen.shape == (len(texts_va), NUM_CLASSES), "Qwen val logits shape mismatch"
+        assert test_qwen.shape == (len(texts_te), NUM_CLASSES), "Qwen test logits shape mismatch"
+        assert "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE, "Qwen retain_backbone offload to Host RAM cache failed"
+        GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta_config", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge_config", None)
+        gc.collect()
         qwen_sps = getattr(train_qwen_lora_fold, "last_throughput", 3.2 if is_qwen3 else 3.5)
         qwen_eval_sps = 12.0
     else:
@@ -359,12 +384,17 @@ def run_dry_run_verifier():
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
     print("[Check 6/9] Testing CPU Multiview Dual-Linear, Sibling Specialists & Subspace Projector...", flush=True)
-    feature_extractor = build_cpu_feature_extractor(style_weight=0.2)
     all_raw = texts_tr + texts_va + texts_te
+    n_tr = len(texts_tr)
+    n_va = len(texts_va)
+    style_extractor = RichStyleFeatures()
+    V_dense_all = style_extractor.fit_transform(all_raw)
+    feature_extractor = build_cpu_feature_extractor(style_weight=0.2, include_style=False)
+    style_scaler = StandardScaler()
     with threadpool_limits(limits=4):
-        X_all = feature_extractor.fit_transform(all_raw)
-        n_tr = len(texts_tr)
-        n_va = len(texts_va)
+        X_tfidf_all = feature_extractor.fit_transform(all_raw)
+        V_scaled_all = (0.2 * style_scaler.fit_transform(V_dense_all)).astype(np.float32)
+        X_all = sp.hstack([X_tfidf_all, sp.csr_matrix(V_scaled_all)], format="csr")
         X_tr = X_all[:n_tr]
         X_va = X_all[n_tr:n_tr + n_va]
         X_te = X_all[n_tr + n_va:]
@@ -389,16 +419,26 @@ def run_dry_run_verifier():
         sparsity = n_zero_coef / clf.svc_2_.coef_.size
         print(f"  [L1 Coordinate Sparsity] {sparsity*100:.1f}% zero weights in svc_2_ (topic-invariant coordinate selection verified) [OK]")
 
-        # IntraFamilyCliqueSpecialist
+        # IntraFamilyCliqueSpecialist with single-pass delta optimization
         clique_specialist = IntraFamilyCliqueSpecialist(alpha_ridge=1.0, beta_refine=0.25, seed=42)
         clique_specialist.fit(X_tr_masked, y_tr_str)
-        val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_masked)
-        test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_masked)
+        y_va_int = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
+        deltas_va = clique_specialist._compute_sibling_deltas(X_va_masked, val_sparse_m.shape[0], val_sparse_m.shape[1])
+        opt_beta = clique_specialist.optimize_beta(val_sparse_m, X_va_masked, y_va_int, precomputed_deltas=deltas_va)
+        val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_masked, beta=opt_beta, precomputed_deltas=deltas_va)
+        test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_masked, beta=opt_beta)
 
-        # Dense Stylometrics & StyleInvariantSubspaceProjector
-        V_dense_tr = RichStyleFeatures().fit_transform(texts_tr)
-        V_dense_va = RichStyleFeatures().fit_transform(texts_va)
-        V_dense_te = RichStyleFeatures().fit_transform(texts_te)
+        # Dense Stylometrics & StyleInvariantSubspaceProjector (single-pass upfront computation matching Step 1)
+        V_dense_tr = V_dense_all[:n_tr]
+        V_dense_va = V_dense_all[n_tr:n_tr + n_va]
+        V_dense_te = V_dense_all[n_tr + n_va:]
+        if ext_df is not None and len(ext_df) >= 8:
+            n_ext_mini = min(16, len(ext_df))
+            V_ext_mini = style_extractor.transform(ext_df["text"].iloc[:n_ext_mini].tolist())
+            w_ext_mini = ext_weights[:n_ext_mini] if ext_weights is not None else np.ones(n_ext_mini, dtype=np.float32)
+            V_ext_aligned = align_external_dense_moments(V_dense_tr, V_ext_mini, w_ext_mini)
+            assert V_ext_aligned.shape == V_ext_mini.shape and np.all(np.isfinite(V_ext_aligned)), "External dense alignment mismatch"
+            print("  [External Moment Alignment] align_external_dense_moments verified [OK]")
         subspace_proj = StyleInvariantSubspaceProjector(n_topic_components=4, attenuation=0.75)
         subspace_proj.fit(V_dense_tr, group_ids[:mini_n_tr], y_labels=y_tr_str)
         V_dense_tr_proj = subspace_proj.transform(V_dense_tr)
@@ -417,8 +457,6 @@ def run_dry_run_verifier():
         # Consensus subblend
         p_sparse_va = margins_to_probs(val_sparse_m, temp=0.20)
         p_sparse_te = margins_to_probs(test_sparse_m, temp=0.20)
-        lbl2id = {l: i for i, l in enumerate(LABELS)}
-        y_va_int = np.array([lbl2id[y] for y in y_va_str], dtype=np.int64)
         cpu_alpha = optimize_cpu_subblend(p_sparse_va, p_dense_va, y_va_int)
         p_cpu_va = cpu_alpha * p_sparse_va + (1.0 - cpu_alpha) * p_dense_va
         p_cpu_te = cpu_alpha * p_sparse_te + (1.0 - cpu_alpha) * p_dense_te
@@ -608,12 +646,15 @@ def run_dry_run_verifier():
     assert np.isnan(nan_stream).any(), "NaN stream must contain NaN"
     print(f"    -> Healthy stream ({h_acc*100:.1f}%) retained; Chance ({c_acc*100:.1f}%) & NaN streams successfully ejected [OK]")
 
-    # 8.3: Meta-Combiner Uniform Fallback Recovery
+    # 8.3: Meta-Combiner Uniform Fallback Recovery (full-matrix check)
     print("  [8.3] Testing Meta-Combiner degenerate prediction fallback...", flush=True)
     fallback_triggered = False
     try:
         uniform_probs = np.full((10, NUM_CLASSES), 1.0 / NUM_CLASSES)
-        if np.allclose(uniform_probs[0], 1.0 / NUM_CLASSES, atol=1e-4):
+        partial_uncertain = np.eye(NUM_CLASSES)[:10].copy()
+        partial_uncertain[0] = 1.0 / NUM_CLASSES
+        assert not np.allclose(partial_uncertain, 1.0 / NUM_CLASSES, atol=1e-4), "Single uncertain row must not discard valid Meta-Combiner matrix"
+        if np.allclose(uniform_probs, 1.0 / NUM_CLASSES, atol=1e-4):
             raise ValueError("Meta-Combiner produced uniform fallback distribution; switching to Quad-Rank blend.")
     except ValueError:
         fallback_preds = quad_rank_blend(
@@ -624,15 +665,18 @@ def run_dry_run_verifier():
         assert len(fallback_preds) == 10
         fallback_triggered = True
     assert fallback_triggered, "Meta-Combiner fallback must succeed"
-    print("    -> Meta-Combiner uniform anomaly caught; Quad-Rank blend fallback verified [OK]")
+    print("    -> Meta-Combiner uniform anomaly caught (and single-row uncertainty preserved); Quad-Rank blend fallback verified [OK]")
 
-    # 8.4: Missing Stream Blend Recovery
+    # 8.4: Missing Stream Blend Recovery (including missing SVM stream)
     print("  [8.4] Testing Missing Stream Blend combinations...", flush=True)
     n_samples_test = 15
     sample_logits = np.random.randn(n_samples_test, NUM_CLASSES)
     # Single stream (CPU only)
     p_single = quad_rank_blend(sample_logits, None, None, None, weights=(1.0, 0.0, 0.0, 0.0))
     assert len(p_single) == n_samples_test
+    # Single stream (DeBERTa only, SVM None)
+    p_deb_only = quad_rank_blend(None, sample_logits, None, None, weights=(0.0, 1.0, 0.0, 0.0))
+    assert len(p_deb_only) == n_samples_test
     # Dual stream (CPU + Qwen)
     p_dual = quad_rank_blend(sample_logits, None, sample_logits, None, weights=(1.0, 0.0, 1.0, 0.0))
     assert len(p_dual) == n_samples_test
@@ -642,7 +686,7 @@ def run_dry_run_verifier():
     # Full quad
     p_quad = quad_rank_blend(sample_logits, sample_logits, sample_logits, sample_logits, weights=(1.0, 1.0, 1.0, 1.0))
     assert len(p_quad) == n_samples_test
-    print("    -> All 4 stream combinations (1x, 2x, 3x, 4x) yield valid, non-empty predictions [OK]")
+    print("    -> All stream combinations (SVM-only, Neural-only, 2x, 3x, 4x) yield valid predictions [OK]")
 
     # 8.5: Incremental & Atomic Parquet Submission Write & Validation Guards
     print("  [8.5] Testing Atomic Parquet Write & Schema Validation Guards...", flush=True)
@@ -678,6 +722,19 @@ def run_dry_run_verifier():
     assert np.all(np.isfinite(res_logits)), "Transductive logits must remain finite on disconnected graph"
     assert np.allclose(res_logits, isolated_logits, atol=1e-5), "Isolated nodes with 0 neighbors must preserve uncentered logits"
     print("    -> Disconnected / zero-neighbor edge case gracefully preserved uncentered logits [OK]")
+
+    # 8.7: Prompt NaN-ID DSU Grouping & Single-Class Clique Guard
+    print("  [8.7] Testing NaN prompt_id grouping & single-class sibling clique guards...", flush=True)
+    nan_pid_df = pd.DataFrame({
+        "prompt_id": [np.nan, "", "p1", None, "p2"],
+        "text": ["alpha text", "beta text", "gamma text", "alpha text", "delta text"],
+    })
+    nan_groups = make_prompt_groups(nan_pid_df)
+    assert len(nan_groups) == 5, "make_prompt_groups must handle NaN/empty prompt IDs without KeyError"
+    assert nan_groups[0] == nan_groups[3] and nan_groups[0] != nan_groups[1], "Duplicate text must union while distinct empty/NaN prompts stay separate"
+    mono_clique = IntraFamilyCliqueSpecialist().fit(sp.csr_matrix(np.random.randn(25, 12)), np.array([LABELS[0]] * 25))
+    assert len(mono_clique.specialists_) == 0, "Single-class clique slice must be safely skipped"
+    print("    -> NaN prompt_id DSU & single-class clique guards verified [OK]")
     print("  -> Production Exception & Fault-Tolerance Verification PASSED [OK]\n", flush=True)
 
     # ── CHECK 9: Global 9-Hour Feasibility & Wall-Clock Budget Matrix with Throughput Verification ───

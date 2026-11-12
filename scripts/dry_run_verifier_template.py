@@ -354,6 +354,16 @@ def run_dry_run_verifier():
     assert len(mock_caps) == 0, "Hooks context manager must clear captured activations on exit"
     print("  Recursive multi-layer hook capture across nested PEFT/HF wrappers verified [OK]")
 
+    # Unit-verify PEFT-safe accelerate hook stripping (protects Fold 1->2 Host RAM offload)
+    try:
+        from accelerate.hooks import AlignDevicesHook, add_hook_to_module
+        add_hook_to_module(mock_peft.base_model.model, AlignDevicesHook())
+        _remove_accelerate_hooks_safe(mock_peft)
+        assert not any("_hf_hook" in s.__dict__ for s in mock_peft.modules()), "PEFT accelerate hooks must strip cleanly"
+        print("  PEFT-safe accelerate hook stripping verified [OK]")
+    except ImportError:
+        pass
+
     if qwen_dir is not None and cuda_ok:
         for gi in range(n_gpus):
             torch.cuda.reset_peak_memory_stats(gi)

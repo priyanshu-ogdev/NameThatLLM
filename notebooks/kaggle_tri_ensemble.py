@@ -3032,6 +3032,57 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
 
 # --- 8. QWEN 3 8B / 2.5 7B LORA FINE-TUNE PER FOLD (DUAL GPU) ---
 
+def _align_device_map_for_module(module: nn.Module, dev_map: dict) -> dict:
+    """Align a saved hf_device_map to exact module names (accounting for PEFT base_model prefixes)."""
+    if not dev_map or not isinstance(dev_map, dict):
+        return {}
+    mod_names = {name for name, _ in module.named_modules()}
+    aligned = {}
+    for k, v in dev_map.items():
+        if k in mod_names:
+            aligned[k] = v
+        elif f"base_model.model.{k}" in mod_names:
+            aligned[f"base_model.model.{k}"] = v
+        elif f"base_model.{k}" in mod_names:
+            aligned[f"base_model.{k}"] = v
+        elif k == "":
+            aligned[""] = v
+    return aligned
+
+
+def _remove_accelerate_hooks_safe(module: nn.Module) -> None:
+    """Strip accelerate device hooks using sub.__dict__ only, bypassing PEFT __getattr__ delegation."""
+    try:
+        from accelerate.hooks import _accelerate_added_attributes
+    except Exception:
+        _accelerate_added_attributes = ("to", "cuda", "npu", "xpu", "mlu", "sdaa", "musa")
+    for sub in list(module.modules()):
+        if "_hf_hook" in sub.__dict__:
+            hook = sub.__dict__["_hf_hook"]
+            try:
+                if hook is not None:
+                    hook.detach_hook(sub)
+            finally:
+                sub.__dict__.pop("_hf_hook", None)
+        if "_old_forward" in sub.__dict__:
+            old_fwd = sub.__dict__.pop("_old_forward")
+            if "GraphModuleImpl" in str(type(sub)):
+                sub.__class__.forward = old_fwd
+            else:
+                sub.forward = old_fwd
+        for attr in _accelerate_added_attributes:
+            sub.__dict__.pop(attr, None)
+        sub.__dict__.pop("hf_device_map", None)
+
+
+def _offload_qwen_backbone_to_cpu_cache(backbone: nn.Module) -> nn.Module:
+    """Safely detach accelerate hooks (PEFT-safe) and move resident backbone to Host RAM."""
+    _remove_accelerate_hooks_safe(backbone)
+    cpu_backbone = backbone.to("cpu")
+    GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = cpu_backbone
+    return cpu_backbone
+
+
 def _train_qwen_lora_fold_impl(
     texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
     model_dir, labels,
@@ -3098,30 +3149,25 @@ def _train_qwen_lora_fold_impl(
         print(f"  [Qwen LoRA] Loading resident backbone from Host RAM cache (0 disk I/O, fast PCIe transfer)...", flush=True)
         backbone = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
         dev_map = GLOBAL_RAM_MODEL_CACHE.get("qwen_device_map")
-        if dev_map is not None and n_gpus >= 2:
+        if n_gpus >= 2:
             try:
-                from accelerate import dispatch_model
-                mod_names = {name for name, _ in backbone.named_modules()}
-                aligned_map = {}
-                for k, v in dev_map.items():
-                    if k in mod_names:
-                        aligned_map[k] = v
-                    elif f"base_model.model.{k}" in mod_names:
-                        aligned_map[f"base_model.model.{k}"] = v
-                    elif f"base_model.{k}" in mod_names:
-                        aligned_map[f"base_model.{k}"] = v
-                    elif k == "":
-                        aligned_map[""] = v
+                from accelerate import dispatch_model, infer_auto_device_map
+                aligned_map = _align_device_map_for_module(backbone, dev_map) if dev_map is not None else {}
+                if not aligned_map:
+                    aligned_map = infer_auto_device_map(
+                        backbone, no_split_module_classes=getattr(backbone, "_no_split_modules", None)
+                    )
                 backbone = dispatch_model(backbone, device_map=aligned_map)
             except Exception as e:
-                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; retrying balanced auto map", flush=True)
+                print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; recomputing balanced auto map", flush=True)
                 try:
-                    backbone = dispatch_model(backbone, device_map="auto")
+                    from accelerate import dispatch_model, infer_auto_device_map
+                    auto_map = infer_auto_device_map(
+                        backbone, no_split_module_classes=getattr(backbone, "_no_split_modules", None)
+                    )
+                    backbone = dispatch_model(backbone, device_map=auto_map)
                 except Exception as e2:
-                    if n_gpus < 2 and cuda_ok:
-                        backbone = backbone.to("cuda:0")
-                    else:
-                        raise RuntimeError(f"Dual-GPU Qwen dispatch failed across {n_gpus} GPUs: {e2}") from e2
+                    raise RuntimeError(f"Dual-GPU Qwen dispatch failed across {n_gpus} GPUs: {e2}") from e2
         elif cuda_ok:
             backbone = backbone.to("cuda:0")
 
@@ -3167,18 +3213,9 @@ def _train_qwen_lora_fold_impl(
         backbone = get_peft_model(backbone, lora_cfg)
         backbone.print_trainable_parameters()
         if hasattr(backbone, "hf_device_map") and backbone.hf_device_map:
-            mod_names = {name for name, _ in backbone.named_modules()}
-            aligned_save_map = {}
-            for k, v in backbone.hf_device_map.items():
-                if k in mod_names:
-                    aligned_save_map[k] = v
-                elif f"base_model.model.{k}" in mod_names:
-                    aligned_save_map[f"base_model.model.{k}"] = v
-                elif f"base_model.{k}" in mod_names:
-                    aligned_save_map[f"base_model.{k}"] = v
-                elif k == "":
-                    aligned_save_map[""] = v
-            GLOBAL_RAM_MODEL_CACHE["qwen_device_map"] = copy.deepcopy(aligned_save_map)
+            GLOBAL_RAM_MODEL_CACHE["qwen_device_map"] = copy.deepcopy(
+                _align_device_map_for_module(backbone, backbone.hf_device_map)
+            )
 
     first_dev = next(backbone.parameters()).device
     last_dev = first_dev
@@ -3528,9 +3565,7 @@ def _train_qwen_lora_fold_impl(
         # Host RAM has >20 GB free; moving Qwen (15.2 GB) to CPU RAM takes ~1.3s via PCIe
         # and eliminates 180s Kaggle FUSE network disk re-read!
         try:
-            from accelerate.hooks import remove_hook_from_submodules
-            remove_hook_from_submodules(backbone)
-            GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = backbone.to("cpu")
+            _offload_qwen_backbone_to_cpu_cache(backbone)
             print("  [Qwen LoRA] Stripped device hooks & offloaded resident backbone to Host RAM (Dual GPUs 100% free)", flush=True)
         except Exception as e:
             print(f"  [Qwen LoRA] Host RAM offload fallback ({e}); releasing backbone.", flush=True)
@@ -3538,6 +3573,7 @@ def _train_qwen_lora_fold_impl(
             GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
         del backbone
     else:
+        _remove_accelerate_hooks_safe(backbone)
         GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
         GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
         del backbone
@@ -3587,10 +3623,7 @@ def train_qwen_lora_fold(
     except Exception:
         if retain_backbone and "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
             try:
-                from accelerate.hooks import remove_hook_from_submodules
-                cached_bb = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
-                remove_hook_from_submodules(cached_bb)
-                GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = cached_bb.to("cpu")
+                _offload_qwen_backbone_to_cpu_cache(GLOBAL_RAM_MODEL_CACHE["qwen_backbone"])
             except Exception:
                 GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
                 GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)

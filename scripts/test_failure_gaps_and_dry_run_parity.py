@@ -344,6 +344,74 @@ def test_7_deduplicated_tta_bit_parity():
     print("[PASS] Test 7: Deduplicated TTA bit-for-bit parity & redundant-pass skip verified")
 
 
+def test_8_peft_accelerate_hook_offload_and_redispatch():
+    """Verify PEFT __getattr__ delegation does not break accelerate hook removal or Fold 2 re-dispatch."""
+    import tempfile
+    import torch
+    import transformers
+    import peft
+    from accelerate import dispatch_model, infer_auto_device_map
+
+    kte.GLOBAL_RAM_MODEL_CACHE.clear()
+    cfg = transformers.Qwen2Config(
+        hidden_size=16, intermediate_size=32, num_hidden_layers=2,
+        num_attention_heads=2, num_key_value_heads=1, vocab_size=64,
+    )
+    base_m = transformers.Qwen2Model(cfg)
+    orig_map = {"embed_tokens": "cpu", "layers.0": "cpu", "layers.1": "cpu", "norm": "cpu", "rotary_emb": "cpu"}
+    base_m = dispatch_model(base_m, device_map=orig_map, force_hooks=True)
+    pm = peft.get_peft_model(
+        base_m,
+        peft.LoraConfig(task_type=peft.TaskType.FEATURE_EXTRACTION, r=2, lora_alpha=4, target_modules=["q_proj", "v_proj"]),
+    )
+    # Confirm PeftModel.__getattr__ makes hasattr(pm, "_hf_hook") True while not in pm.__dict__
+    assert hasattr(pm, "_hf_hook") and "_hf_hook" not in pm.__dict__
+
+    aligned_map = kte._align_device_map_for_module(pm, pm.hf_device_map)
+    assert aligned_map and all(k in {n for n, _ in pm.named_modules()} for k in aligned_map)
+
+    try:
+        kte._offload_qwen_backbone_to_cpu_cache(pm)
+        assert "qwen_backbone" in kte.GLOBAL_RAM_MODEL_CACHE
+        cached = kte.GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
+        assert not any("_hf_hook" in s.__dict__ or "_old_forward" in s.__dict__ for s in cached.modules())
+
+        # Verify Fold 2 re-dispatch using aligned_map and infer_auto_device_map fallback (no string "auto")
+        redispatched = dispatch_model(cached, device_map=aligned_map, force_hooks=True)
+        out = redispatched(input_ids=torch.randint(0, 64, (2, 4)))
+        out.last_hidden_state.sum().backward()
+        kte._remove_accelerate_hooks_safe(redispatched)
+        auto_map = infer_auto_device_map(
+            redispatched, no_split_module_classes=getattr(redispatched, "_no_split_modules", None)
+        )
+        assert isinstance(auto_map, dict) and len(auto_map) > 0
+        redispatched2 = dispatch_model(redispatched, device_map=auto_map, force_hooks=True)
+        assert redispatched2(input_ids=torch.randint(0, 64, (2, 4))).last_hidden_state.shape == (2, 4, 16)
+        kte._remove_accelerate_hooks_safe(redispatched2)
+
+        # Also exercise exception-cleanup path in train_qwen_lora_fold with retain_backbone=True
+        with tempfile.TemporaryDirectory() as td:
+            tok_dir = Path(td) / "tiny_tok"
+            tok_dir.mkdir()
+            kte.GLOBAL_RAM_MODEL_CACHE["qwen_backbone"] = cached
+            kte.GLOBAL_RAM_MODEL_CACHE["qwen_device_map"] = aligned_map
+            dispatch_model(cached, device_map=aligned_map, force_hooks=True)
+            with mock.patch.object(kte, "_train_qwen_lora_fold_impl", side_effect=RuntimeError("simulated fold abort")):
+                try:
+                    kte.train_qwen_lora_fold(
+                        ["t0"] * 4, [LABELS[0]] * 4, ["v0"] * 2, [LABELS[0]] * 2, ["e0"] * 2,
+                        str(tok_dir), LABELS, retain_backbone=True,
+                    )
+                    raise AssertionError("Expected RuntimeError")
+                except RuntimeError as e:
+                    assert "simulated fold abort" in str(e)
+            assert "qwen_backbone" in kte.GLOBAL_RAM_MODEL_CACHE
+            assert not any("_hf_hook" in s.__dict__ for s in kte.GLOBAL_RAM_MODEL_CACHE["qwen_backbone"].modules())
+    finally:
+        kte.GLOBAL_RAM_MODEL_CACHE.clear()
+    print("[PASS] Test 8: PEFT + accelerate hook offload, Fold 2 re-dispatch & abort cleanup verified")
+
+
 if __name__ == "__main__":
     test_1_prompt_groups_nan_and_empty_ids()
     test_2_single_class_clique_and_tiny_subspace()
@@ -352,4 +420,5 @@ if __name__ == "__main__":
     test_5_run_quad_ensemble_partial_and_na_ids()
     test_6_external_discovery_and_schema_resilience()
     test_7_deduplicated_tta_bit_parity()
-    print("\nALL 7 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")
+    test_8_peft_accelerate_hook_offload_and_redispatch()
+    print("\nALL 8 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")

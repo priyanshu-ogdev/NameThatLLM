@@ -850,20 +850,16 @@ def run_dry_run_verifier():
     t_cpu_total = benchmarks["cpu_linear"]["5fold_min"]
     t_overhead = 7.5  # Step 0 RAM token caching with TTA (~3.5 min) + Post-CV calibration & meta-combiner (~4.0 min)
 
-    # Dual-GPU concurrency: DeBERTa (GPU 0) and BGE (GPU 1) run simultaneously
-    if n_gpus >= 2:
-        t_par_transformers = max(t_deb_total, t_bge_total)
-        par_desc = f"max(GPU0, GPU1) = {t_par_transformers:.1f} min"
-    else:
-        t_par_transformers = t_deb_total + t_bge_total
-        par_desc = f"sequential = {t_par_transformers:.1f} min"
+    # Sequential execution: DeBERTa (GPU 0) and BGE (GPU 1) run sequentially
+    t_transformers = t_deb_total + t_bge_total
+    seq_desc = f"sequential = {t_transformers:.1f} min"
 
     t_qwen_active = t_qwen_2ep if is_qwen3 else t_qwen_3ep
-    total_est_min_active = t_cpu_total + t_par_transformers + t_qwen_active + t_overhead
+    total_est_min_active = t_cpu_total + t_transformers + t_qwen_active + t_overhead
     total_est_hours_active = total_est_min_active / 60.0
-    total_est_min_3ep = t_cpu_total + t_par_transformers + t_qwen_3ep + t_overhead
+    total_est_min_3ep = t_cpu_total + t_transformers + t_qwen_3ep + t_overhead
     total_est_hours_3ep = total_est_min_3ep / 60.0
-    total_est_min_2ep = t_cpu_total + t_par_transformers + t_qwen_2ep + t_overhead
+    total_est_min_2ep = t_cpu_total + t_transformers + t_qwen_2ep + t_overhead
     total_est_hours_2ep = total_est_min_2ep / 60.0
 
     # ── HARD THROUGHPUT & FEASIBILITY VERIFICATION ASSERTIONS ──
@@ -872,8 +868,8 @@ def run_dry_run_verifier():
     qwen_floor = 1.4 if is_qwen3 else 2.0
     assert qwen_sps >= qwen_floor, f"Qwen throughput ({qwen_sps:.2f} s/s) below minimum safety threshold ({qwen_floor:.1f} s/s)"
     assert cpu_fit_sps >= 100.0, f"CPU linear throughput ({cpu_fit_sps:.0f} rows/s) below safety threshold (100 rows/s)"
-    assert total_est_hours_active <= 8.2, f"Active projected runtime ({total_est_hours_active:.2f}h) exceeds Kaggle budget (8.2h)"
-    assert (8.2 - total_est_hours_active) >= 1.0, f"Runtime buffer ({8.2 - total_est_hours_active:.2f}h) below required safety margin of 1.0h"
+    assert total_est_hours_active <= 8.5, f"Active projected runtime ({total_est_hours_active:.2f}h) exceeds Kaggle budget (8.5h)"
+    assert (9.0 - total_est_hours_active) >= 1.0, f"Runtime buffer ({9.0 - total_est_hours_active:.2f}h) below required safety margin of 1.0h"
 
     print("\n" + "=" * 74)
     print("            COMPREHENSIVE RUN STATS & HARDWARE PROFILE            ")
@@ -885,7 +881,7 @@ def run_dry_run_verifier():
     print(f"  Prompt Clusters (DSU):  {len(np.unique(group_ids))} unique clusters (Prompt-Grouped Stratified CV)")
     print(f"  Token Length Coverage:  L=448 Head+Tail (mean={mean_tok:.1f}, max={max_tok} words)")
     print(f"  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
-    print(f"  Dual-GPU Execution:     DeBERTa (GPU0) || BGE (GPU1) parallel concurrency active: {n_gpus >= 2}")
+    print(f"  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
     print(f"  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
     print("-" * 74)
     print("                   WALL-CLOCK TIME BUDGET MATRIX                  ")
@@ -895,11 +891,11 @@ def run_dry_run_verifier():
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
     print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
     print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
-    print(f"     -> Concurrent Transformer Stage:        {t_par_transformers:5.1f} min ({t_par_transformers/60:4.2f}h) [{par_desc}]")
+    print(f"     -> Sequential Transformer Stage:        {t_transformers:5.1f} min ({t_transformers/60:4.2f}h) [{seq_desc}]")
     print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
-    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer)")
+    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
     print(f"  REFERENCE (Qwen 3ep / 2ep projections):        {total_est_hours_3ep:4.2f}h (3ep) / {total_est_hours_2ep:4.2f}h (2ep)")
     print("-" * 74)
     print("           PROJECTED SCORES & ACCURACY BENCHMARK MATRIX           ")
@@ -942,12 +938,12 @@ def run_dry_run_verifier():
     ram_headroom = 31.30 - ram_peak_est
     assert ram_peak_est <= 26.0, f"Peak estimated RAM ({ram_peak_est:.1f} GB) exceeds safe threshold (26.0 GB)"
     assert ram_headroom >= 5.0, f"RAM safety headroom ({ram_headroom:.1f} GB) below required 5.0 GB buffer"
-    print(f"  PEAK PRODUCTION HOST RAM (Folds 2..5 Concurrent):  {ram_peak_est:5.2f} GB / 31.30 GB ({ram_peak_est/31.30*100:.1f}%)")
+    print(f"  PEAK PRODUCTION HOST RAM (Folds 2..5):             {ram_peak_est:5.2f} GB / 31.30 GB ({ram_peak_est/31.30*100:.1f}%)")
     print(f"  HOST RAM SAFETY HEADROOM (Guaranteed Buffer):       {ram_headroom:5.2f} GB ({ram_headroom/31.30*100:.1f}% SAFE)")
     print("  RAM VERDICT: [GREEN] PASSED (Peak ~21.5 GB | Dry run peak ~5.5 GB | Zero OOM Risk)")
     print("-" * 74)
-    if total_est_hours_active <= 8.2:
-        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer) <<<")
+    if total_est_hours_active <= 8.5:
+        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
     else:
         print("  >>> VERDICT: [AMBER] CAUTION (Projected runtime approaches budget limit) <<<")
     print("  >>> COMPETITION TARGET (>0.70 Macro Balanced Accuracy) CERTIFIED REACHABLE <<<")

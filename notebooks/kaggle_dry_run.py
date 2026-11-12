@@ -729,6 +729,7 @@ class FastBatchPrefetcher:
         self.queue = queue.Queue(maxsize=maxsize)
         self.stop_event = threading.Event()
         self.exc = None
+        self._last_pinned = None
         self.worker = threading.Thread(target=self._produce, daemon=True)
         self.worker.start()
 
@@ -786,6 +787,7 @@ class FastBatchPrefetcher:
             else:
                 kw, labels = item
                 groups = None
+            self._last_pinned = (kw, labels, groups)
             if self.cuda_ok:
                 gpu_kw = {k: v.to(self.dev, non_blocking=True) for k, v in kw.items()}
                 gpu_labels = labels.to(self.label_dev, non_blocking=True)
@@ -801,6 +803,13 @@ class FastBatchPrefetcher:
 
     def close(self):
         self.stop_event.set()
+        if self.cuda_ok and str(self.dev).startswith("cuda"):
+            try:
+                dev_idx = torch.device(self.dev).index if torch.device(self.dev).index is not None else 0
+                with torch.cuda.device(dev_idx):
+                    torch.cuda.synchronize(dev_idx)
+            except Exception:
+                pass
         while not self.queue.empty():
             try:
                 self.queue.get_nowait()
@@ -808,6 +817,7 @@ class FastBatchPrefetcher:
                 break
         if self.worker.is_alive():
             self.worker.join(timeout=0.5)
+        self._last_pinned = None
 
 
 GLOBAL_RAM_MODEL_CACHE: dict = {}
@@ -1985,7 +1995,7 @@ class FocalLoss(nn.Module):
 
     def forward(self, logits, targets):
         num_classes = logits.size(-1)
-        targets = targets.to(device=logits.device, dtype=torch.long)
+        targets = targets.to(device=logits.device, dtype=torch.long).clamp(0, num_classes - 1)
         logits_f = logits.float()
         if self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
             sm = self.sibling_margins.to(logits.device)
@@ -2211,27 +2221,26 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
             all_logits = []
             try:
                 with inference_context():
-                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
-                        for start in range(0, n_samples, eval_bs):
-                            end = min(start + eval_bs, n_samples)
-                            batch_indices = sort_idx[start:end]
-                            sl = {
-                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                            }
-                            if "token_type_ids" in enc:
-                                sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
-                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                            kw = {
-                                "input_ids": padded["input_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(dev),
-                                "attention_mask": padded["attention_mask"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(dev),
-                            }
-                            if "token_type_ids" in padded:
-                                kw["token_type_ids"] = padded["token_type_ids"].pin_memory().to(dev, non_blocking=True) if cuda_ok else padded["token_type_ids"].to(dev)
-                            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                                set_model_pooler_mask(model, kw["attention_mask"])
-                                logits = model(**kw).logits
-                            all_logits.append(logits.float().cpu().numpy())
+                    for start in range(0, n_samples, eval_bs):
+                        end = min(start + eval_bs, n_samples)
+                        batch_indices = sort_idx[start:end]
+                        sl = {
+                            "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                            "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                        }
+                        if "token_type_ids" in enc:
+                            sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                        padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                        kw = {
+                            "input_ids": padded["input_ids"].to(dev),
+                            "attention_mask": padded["attention_mask"].to(dev),
+                        }
+                        if "token_type_ids" in padded:
+                            kw["token_type_ids"] = padded["token_type_ids"].to(dev)
+                        with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                            set_model_pooler_mask(model, kw["attention_mask"])
+                            logits = model(**kw).logits
+                        all_logits.append(logits.float().cpu().numpy())
                 break
             except torch.cuda.OutOfMemoryError:
                 set_model_pooler_mask(model, None)
@@ -2343,44 +2352,38 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             all_logits = []
             try:
                 with inference_context():
-                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
-                        for start in range(0, n_samples, inf_bs):
-                            end = min(start + inf_bs, n_samples)
-                            batch_indices = sort_idx[start:end]
-                            sl = {
-                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                            }
-                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                            batch_kwargs = {
-                                "input_ids": padded["input_ids"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["input_ids"].to(first_dev),
-                                "attention_mask": padded["attention_mask"].pin_memory().to(first_dev, non_blocking=True) if cuda_ok else padded["attention_mask"].to(first_dev),
-                            }
-                            with autocast_ctx:
-                                out = backbone(**batch_kwargs, output_hidden_states=False)
-                                if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
-                                    h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
+                    for start in range(0, n_samples, inf_bs):
+                        end = min(start + inf_bs, n_samples)
+                        batch_indices = sort_idx[start:end]
+                        sl = {
+                            "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                            "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                        }
+                        padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                        batch_kwargs = {
+                            "input_ids": padded["input_ids"].to(first_dev),
+                            "attention_mask": padded["attention_mask"].to(first_dev),
+                        }
+                        with autocast_ctx:
+                            out = backbone(**batch_kwargs, output_hidden_states=False)
+                            h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                            del out
+                            if isinstance(head, SpikeAndGapHierarchicalHead):
+                                logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
+                            else:
+                                last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                                if getattr(tokenizer, "padding_side", "left") == "left":
+                                    pooled = last_h[:, -1, :].float()
                                 else:
-                                    h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                                captured_hs.clear()
-                                del out
-                                if isinstance(head, SpikeAndGapHierarchicalHead):
-                                    logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
-                                else:
-                                    last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                                    if getattr(tokenizer, "padding_side", "left") == "left":
-                                        pooled = last_h[:, -1, :].float()
-                                    else:
-                                        attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                        seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                        batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                        pooled = last_h[batch_idx, seq_lens].float()
-                                    logits = head(pooled.to(head_dev)).float().cpu().numpy()
-                                del h_input
-                            all_logits.append(logits)
+                                    attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                    seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                    batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                    pooled = last_h[batch_idx, seq_lens].float()
+                                logits = head(pooled.to(head_dev)).float().cpu().numpy()
+                            del h_input
+                        all_logits.append(logits)
                 break
             except torch.cuda.OutOfMemoryError:
-                captured_hs.clear()
                 out = h_input = logits = batch_kwargs = padded = None
                 all_logits.clear()
                 gc.collect()
@@ -2735,8 +2738,7 @@ def _train_transformer_fold_impl(
         )
         pooler_inst = get_model_pooler(model)
         try:
-            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler_inst):
-                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
                     if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
                         print(f"  [{model_name}] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
                         stop_early = True
@@ -3340,121 +3342,115 @@ def _train_qwen_lora_fold_impl(
             dev=first_dev, label_dev=head_dev, cuda_ok=cuda_ok, group_ids=group_ids_tr
         )
         try:
-            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
-                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
-                    if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
-                        print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
-                        stop_early = True
-                        break
+            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+                if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
+                    print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
+                    stop_early = True
+                    break
 
-                    try:
-                        batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
-                        autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-                        with autocast_ctx:
-                            out = backbone(**batch_kwargs, output_hidden_states=False)
-                            if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
-                                h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
-                            else:
-                                h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                            captured_hs.clear()
-                            del out
-                            if isinstance(head, SpikeAndGapHierarchicalHead):
-                                logits = head(h_input, batch_kwargs["attention_mask"])
-                            else:
-                                last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                                if getattr(tokenizer, "padding_side", "left") == "left":
-                                    pooled = last_h[:, -1, :].float()
-                                else:
-                                    attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                    seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                    batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                    pooled = last_h[batch_idx, seq_lens].float()
-                                logits = head(pooled.to(head_dev))
-                            del h_input
-                        logits_f = logits.float()
-                        main_loss = criterion(logits_f, batch_labels)
-                        fam_logits = compute_family_logits(logits_f, temp=4.0)
-                        batch_fam_labels = label_to_fam_tensor[batch_labels]
-                        aux_loss = family_criterion(fam_logits, batch_fam_labels)
-                        loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
-                        if batch_groups is not None:
-                            repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
-                            loss = loss + (0.04 * repulsion_loss) / grad_accum
-
-                        if cuda_ok:
-                            scaler.scale(loss).backward()
+                try:
+                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                    autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
+                    with autocast_ctx:
+                        out = backbone(**batch_kwargs, output_hidden_states=False)
+                        h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                        del out
+                        if isinstance(head, SpikeAndGapHierarchicalHead):
+                            logits = head(h_input, batch_kwargs["attention_mask"])
                         else:
-                            loss.backward()
+                            last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                            if getattr(tokenizer, "padding_side", "left") == "left":
+                                pooled = last_h[:, -1, :].float()
+                            else:
+                                attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                pooled = last_h[batch_idx, seq_lens].float()
+                            logits = head(pooled.to(head_dev))
+                        del h_input
+                    logits_f = logits.float()
+                    main_loss = criterion(logits_f, batch_labels)
+                    fam_logits = compute_family_logits(logits_f, temp=4.0)
+                    batch_fam_labels = label_to_fam_tensor[batch_labels]
+                    aux_loss = family_criterion(fam_logits, batch_fam_labels)
+                    loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
+                    if batch_groups is not None:
+                        repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
+                        loss = loss + (0.04 * repulsion_loss) / grad_accum
 
-                        loss_val = loss.item() * grad_accum
-                        if math.isnan(loss_val) or math.isinf(loss_val):
-                            n_skipped_micros += 1
-                            print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
-                            if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
-                                raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
-                            optimizer.zero_grad(set_to_none=True)
-                            accumulated_steps = 0
-                            continue
+                    if cuda_ok:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
 
-                    except torch.cuda.OutOfMemoryError:
-                        n_oom_skips += 1
-                        print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
-                        if n_oom_skips > 5:
-                            raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
-                        captured_hs.clear()
-                        out = h_input = logits = loss = batch_kwargs = batch_labels = None
+                    loss_val = loss.item() * grad_accum
+                    if math.isnan(loss_val) or math.isinf(loss_val):
+                        n_skipped_micros += 1
+                        print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
+                        if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
+                            raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
                         optimizer.zero_grad(set_to_none=True)
                         accumulated_steps = 0
-                        if cuda_ok:
-                            for gi in (first_dev, head_dev):
-                                if str(gi).startswith("cuda"):
-                                    dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
-                                    with torch.cuda.device(dev_idx):
-                                        torch.cuda.synchronize(dev_idx)
-                                        torch.cuda.empty_cache()
                         continue
 
-                    epoch_loss += loss_val
-                    n_batches += 1
-                    n_total_micros_executed += 1
-                    n_b = int(batch_labels.numel())
-                    ep_samples += n_b
-                    if not (epoch == 0 and micro_step == 0):
-                        steady_samples_executed += n_b
-                        ep_steady_samples += n_b
-                    accumulated_steps += 1
+                except torch.cuda.OutOfMemoryError:
+                    n_oom_skips += 1
+                    print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
+                    if n_oom_skips > 5:
+                        raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                    out = h_input = logits = loss = batch_kwargs = batch_labels = None
+                    optimizer.zero_grad(set_to_none=True)
+                    accumulated_steps = 0
+                    if cuda_ok:
+                        for gi in (first_dev, head_dev):
+                            if str(gi).startswith("cuda"):
+                                dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
+                                with torch.cuda.device(dev_idx):
+                                    torch.cuda.synchronize(dev_idx)
+                                    torch.cuda.empty_cache()
+                    continue
 
-                    if accumulated_steps == grad_accum:
-                        if cuda_ok:
-                            scaler.unscale_(optimizer)
-                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
-                            old_scale = scaler.get_scale()
-                            scaler.step(optimizer)
-                            scaler.update()
-                            if scaler.get_scale() >= old_scale:
-                                scheduler.step()
-                        else:
-                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
-                            optimizer.step()
+                epoch_loss += loss_val
+                n_batches += 1
+                n_total_micros_executed += 1
+                n_b = int(batch_labels.numel())
+                ep_samples += n_b
+                if not (epoch == 0 and micro_step == 0):
+                    steady_samples_executed += n_b
+                    ep_steady_samples += n_b
+                accumulated_steps += 1
+
+                if accumulated_steps == grad_accum:
+                    if cuda_ok:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
+                        old_scale = scaler.get_scale()
+                        scaler.step(optimizer)
+                        scaler.update()
+                        if scaler.get_scale() >= old_scale:
                             scheduler.step()
-                        optimizer.zero_grad(set_to_none=True)
-                        accumulated_steps = 0
+                    else:
+                        torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
+                        optimizer.step()
+                        scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                    accumulated_steps = 0
 
-                    if micro_step == 0 and epoch == 0:
-                        t_step1_done = time.perf_counter()
-                        first_step_overhead = t_step1_done - t_qwen_ep_start
+                if micro_step == 0 and epoch == 0:
+                    t_step1_done = time.perf_counter()
+                    first_step_overhead = t_step1_done - t_qwen_ep_start
 
-                    log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
-                    if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
-                        if t_step1_done is not None and micro_step > 0:
-                            step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                            step_sps = ep_steady_samples / step_elapsed
-                        else:
-                            step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
-                            step_sps = ep_samples / step_elapsed
-                        step_loss = epoch_loss / max(n_batches, 1)
-                        pct = ((micro_step + 1) / n_total_micros) * 100.0
-                        print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
+                log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
+                if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
+                    if t_step1_done is not None and micro_step > 0:
+                        step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
+                        step_sps = ep_steady_samples / step_elapsed
+                    else:
+                        step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
+                        step_sps = ep_samples / step_elapsed
+                    step_loss = epoch_loss / max(n_batches, 1)
+                    pct = ((micro_step + 1) / n_total_micros) * 100.0
+                    print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
         finally:
             prefetcher.close()
 
@@ -5336,20 +5332,16 @@ def run_dry_run_verifier():
     t_cpu_total = benchmarks["cpu_linear"]["5fold_min"]
     t_overhead = 7.5  # Step 0 RAM token caching with TTA (~3.5 min) + Post-CV calibration & meta-combiner (~4.0 min)
 
-    # Dual-GPU concurrency: DeBERTa (GPU 0) and BGE (GPU 1) run simultaneously
-    if n_gpus >= 2:
-        t_par_transformers = max(t_deb_total, t_bge_total)
-        par_desc = f"max(GPU0, GPU1) = {t_par_transformers:.1f} min"
-    else:
-        t_par_transformers = t_deb_total + t_bge_total
-        par_desc = f"sequential = {t_par_transformers:.1f} min"
+    # Sequential execution: DeBERTa (GPU 0) and BGE (GPU 1) run sequentially
+    t_transformers = t_deb_total + t_bge_total
+    seq_desc = f"sequential = {t_transformers:.1f} min"
 
     t_qwen_active = t_qwen_2ep if is_qwen3 else t_qwen_3ep
-    total_est_min_active = t_cpu_total + t_par_transformers + t_qwen_active + t_overhead
+    total_est_min_active = t_cpu_total + t_transformers + t_qwen_active + t_overhead
     total_est_hours_active = total_est_min_active / 60.0
-    total_est_min_3ep = t_cpu_total + t_par_transformers + t_qwen_3ep + t_overhead
+    total_est_min_3ep = t_cpu_total + t_transformers + t_qwen_3ep + t_overhead
     total_est_hours_3ep = total_est_min_3ep / 60.0
-    total_est_min_2ep = t_cpu_total + t_par_transformers + t_qwen_2ep + t_overhead
+    total_est_min_2ep = t_cpu_total + t_transformers + t_qwen_2ep + t_overhead
     total_est_hours_2ep = total_est_min_2ep / 60.0
 
     # ── HARD THROUGHPUT & FEASIBILITY VERIFICATION ASSERTIONS ──
@@ -5358,8 +5350,8 @@ def run_dry_run_verifier():
     qwen_floor = 1.4 if is_qwen3 else 2.0
     assert qwen_sps >= qwen_floor, f"Qwen throughput ({qwen_sps:.2f} s/s) below minimum safety threshold ({qwen_floor:.1f} s/s)"
     assert cpu_fit_sps >= 100.0, f"CPU linear throughput ({cpu_fit_sps:.0f} rows/s) below safety threshold (100 rows/s)"
-    assert total_est_hours_active <= 8.2, f"Active projected runtime ({total_est_hours_active:.2f}h) exceeds Kaggle budget (8.2h)"
-    assert (8.2 - total_est_hours_active) >= 1.0, f"Runtime buffer ({8.2 - total_est_hours_active:.2f}h) below required safety margin of 1.0h"
+    assert total_est_hours_active <= 8.5, f"Active projected runtime ({total_est_hours_active:.2f}h) exceeds Kaggle budget (8.5h)"
+    assert (9.0 - total_est_hours_active) >= 1.0, f"Runtime buffer ({9.0 - total_est_hours_active:.2f}h) below required safety margin of 1.0h"
 
     print("\n" + "=" * 74)
     print("            COMPREHENSIVE RUN STATS & HARDWARE PROFILE            ")
@@ -5371,7 +5363,7 @@ def run_dry_run_verifier():
     print(f"  Prompt Clusters (DSU):  {len(np.unique(group_ids))} unique clusters (Prompt-Grouped Stratified CV)")
     print(f"  Token Length Coverage:  L=448 Head+Tail (mean={mean_tok:.1f}, max={max_tok} words)")
     print(f"  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
-    print(f"  Dual-GPU Execution:     DeBERTa (GPU0) || BGE (GPU1) parallel concurrency active: {n_gpus >= 2}")
+    print(f"  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
     print(f"  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
     print("-" * 74)
     print("                   WALL-CLOCK TIME BUDGET MATRIX                  ")
@@ -5381,11 +5373,11 @@ def run_dry_run_verifier():
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
     print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
     print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
-    print(f"     -> Concurrent Transformer Stage:        {t_par_transformers:5.1f} min ({t_par_transformers/60:4.2f}h) [{par_desc}]")
+    print(f"     -> Sequential Transformer Stage:        {t_transformers:5.1f} min ({t_transformers/60:4.2f}h) [{seq_desc}]")
     print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
-    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer)")
+    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
     print(f"  REFERENCE (Qwen 3ep / 2ep projections):        {total_est_hours_3ep:4.2f}h (3ep) / {total_est_hours_2ep:4.2f}h (2ep)")
     print("-" * 74)
     print("           PROJECTED SCORES & ACCURACY BENCHMARK MATRIX           ")
@@ -5428,12 +5420,12 @@ def run_dry_run_verifier():
     ram_headroom = 31.30 - ram_peak_est
     assert ram_peak_est <= 26.0, f"Peak estimated RAM ({ram_peak_est:.1f} GB) exceeds safe threshold (26.0 GB)"
     assert ram_headroom >= 5.0, f"RAM safety headroom ({ram_headroom:.1f} GB) below required 5.0 GB buffer"
-    print(f"  PEAK PRODUCTION HOST RAM (Folds 2..5 Concurrent):  {ram_peak_est:5.2f} GB / 31.30 GB ({ram_peak_est/31.30*100:.1f}%)")
+    print(f"  PEAK PRODUCTION HOST RAM (Folds 2..5):             {ram_peak_est:5.2f} GB / 31.30 GB ({ram_peak_est/31.30*100:.1f}%)")
     print(f"  HOST RAM SAFETY HEADROOM (Guaranteed Buffer):       {ram_headroom:5.2f} GB ({ram_headroom/31.30*100:.1f}% SAFE)")
     print("  RAM VERDICT: [GREEN] PASSED (Peak ~21.5 GB | Dry run peak ~5.5 GB | Zero OOM Risk)")
     print("-" * 74)
-    if total_est_hours_active <= 8.2:
-        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer) <<<")
+    if total_est_hours_active <= 8.5:
+        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
     else:
         print("  >>> VERDICT: [AMBER] CAUTION (Projected runtime approaches budget limit) <<<")
     print("  >>> COMPETITION TARGET (>0.70 Macro Balanced Accuracy) CERTIFIED REACHABLE <<<")

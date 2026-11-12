@@ -82,38 +82,46 @@ def run_dry_run_verifier():
     ext_weights = None
     if ext_path is not None and Path(ext_path).is_file():
         try:
-            print("  Verifying mass-balanced external corpus loader...", flush=True)
+            print(f"  Verifying mass-balanced external corpus loader ({ext_path})...", flush=True)
             comb_ext_df, comb_ext_weights = build_mass_balanced_external_corpus(
                 train_df, ext_path, LABELS, ext_mass_ratio=0.55, prefer_multi_model=True
             )
             ext_df = comb_ext_df.iloc[len(train_df):].reset_index(drop=True)
-            ext_weights = comb_ext_weights[len(train_df):]
+            ext_weights = comb_ext_weights[len(train_df):].copy()
             n_comp = len(train_df)
             assert np.isclose(comb_ext_weights.sum(), float(n_comp), atol=1e-4), "Mass conservation invariant failed"
             assert ext_weights.max() <= 0.35 + 1e-4, "External variance cap ceiling failed"
-            print(f"  External Corpus Verified: {len(ext_df):,} rows, Sum(w)={comb_ext_weights.sum():.1f}, Max(w_ext)={ext_weights.max():.4f} [OK]")
+            print(f"  External Corpus Verified: {len(ext_df):,} rows across {ext_df['model'].nunique()} classes, Sum(w)={comb_ext_weights.sum():.1f}, Max(w_ext)={ext_weights.max():.4f} [OK]")
+            del comb_ext_df, comb_ext_weights
         except Exception as e:
             print(f"  External Corpus verification warning: {e}. Falling back to competition-only.")
             ext_df = None
-
-    # Smoke Test Slice setup
-    mini_n_tr = min(40, len(train_df))
-    mini_n_va = min(16, len(train_df) - mini_n_tr)
-    if mini_n_va <= 0:
-        mini_n_va = mini_n_tr
-        va_start = 0
+            ext_weights = None
     else:
-        va_start = mini_n_tr
-    texts_tr = train_df["text"].iloc[:mini_n_tr].tolist()
-    y_tr_str = train_df["model"].iloc[:mini_n_tr].tolist()
-    texts_va = train_df["text"].iloc[va_start:va_start + mini_n_va].tolist()
-    y_va_str = train_df["model"].iloc[va_start:va_start + mini_n_va].tolist()
+        print("  External Corpus: None attached (competition-only fallback active)")
+
+    # Diverse stratified/spread Smoke Test Slice setup (avoids single-prompt clusters at row 0..39)
+    n_total_tr = len(train_df)
+    mini_n_tr = min(40, n_total_tr)
+    all_pos = np.linspace(0, n_total_tr - 1, num=min(56, n_total_tr), dtype=int)
+    all_pos = np.unique(all_pos)
+    if len(all_pos) > mini_n_tr:
+        tr_pos = all_pos[:mini_n_tr]
+        va_pos = all_pos[mini_n_tr:]
+    else:
+        tr_pos = all_pos
+        va_pos = all_pos
+    texts_tr = train_df["text"].iloc[tr_pos].tolist()
+    y_tr_str = train_df["model"].iloc[tr_pos].tolist()
+    group_ids_mini_tr = group_ids[tr_pos]
+    texts_va = train_df["text"].iloc[va_pos].tolist()
+    y_va_str = train_df["model"].iloc[va_pos].tolist()
     texts_te = test_df["text"].iloc[:min(10, len(test_df))].tolist()
-    print(f"  Smoke Test Slice: {len(texts_tr)} train, {len(texts_va)} val, {len(texts_te)} test passages", flush=True)
+    print(f"  Smoke Test Slice: {len(texts_tr)} train ({len(np.unique(group_ids_mini_tr))} prompts), {len(texts_va)} val, {len(texts_te)} test passages", flush=True)
 
     # Smoke test upfront token caching (Step 0) & Host RAM Model Cache + TTA Cache Verification
     print("  Testing Step 0 upfront token caching & Host RAM Model Cache on full smoke slice...", flush=True)
-    smoke_tr_va = texts_tr + (texts_va if va_start == mini_n_tr else [])
+    smoke_tr_va = texts_tr + texts_va
     smoke_caches = precompute_token_caches(smoke_tr_va, texts_te, deberta_dir, bge_dir, qwen_dir, max_length=448)
     print(f"  RAM Token Caches verified: {list(smoke_caches.keys())} [OK]")
     for m_tag, m_cache in smoke_caches.items():
@@ -121,8 +129,8 @@ def run_dry_run_verifier():
         assert len(m_cache["tr"]["input_ids"]) == len(smoke_tr_va), f"Token cache tr length mismatch for {m_tag}"
         assert len(m_cache["te"]["input_ids"]) == len(texts_te), f"Token cache te length mismatch for {m_tag}"
         assert len(m_cache["te"]["input_ids"]) == len(m_cache["te_tta"]["input_ids"]), "te and te_tta sample count mismatch"
-        m_cache["tr_slice"] = {k: m_cache["tr"][k][:mini_n_tr] for k in m_cache["tr"]}
-        m_cache["va_slice"] = {k: m_cache["tr"][k][va_start:va_start + mini_n_va] for k in m_cache["tr"]}
+        m_cache["tr_slice"] = {k: m_cache["tr"][k][:len(texts_tr)] for k in m_cache["tr"]}
+        m_cache["va_slice"] = {k: m_cache["tr"][k][len(texts_tr):len(texts_tr) + len(texts_va)] for k in m_cache["tr"]}
         assert len(m_cache["tr_slice"]["input_ids"]) == len(texts_tr)
         assert len(m_cache["va_slice"]["input_ids"]) == len(texts_va)
     print("  Stylometric TTA Token Caches (te_tta: 128 head + 320 tail) & split alignment verified [OK]")
@@ -168,6 +176,7 @@ def run_dry_run_verifier():
     print("  StylometricMultiMomentPooler Multi-Layer Fusion (-1, -3, -6) & gradient backpropagation verified [OK]")
 
     if deberta_dir is not None and cuda_ok:
+        torch.cuda.reset_peak_memory_stats(0)
         deb_smoke_kw = {}
         if "deberta" in smoke_caches:
             deb_smoke_kw["cached_enc_tr"] = smoke_caches["deberta"]["tr_slice"]
@@ -181,13 +190,26 @@ def run_dry_run_verifier():
             device="cuda:0",
             batch_size=16, grad_accum=1, max_length=448, epochs=1,
             enable_grad_checkpointing=True,
-            group_ids_tr=group_ids[:mini_n_tr],
+            group_ids_tr=group_ids_mini_tr,
             **deb_smoke_kw,
         )
         check_finite_logits(val_deb, "DeBERTa Val")
         check_finite_logits(test_deb, "DeBERTa Test")
         assert val_deb.shape == (len(texts_va), NUM_CLASSES), "DeBERTa val logits shape mismatch"
         assert test_deb.shape == (len(texts_te), NUM_CLASSES), "DeBERTa test logits shape mismatch"
+        assert "deberta" in GLOBAL_RAM_MODEL_CACHE, "DeBERTa Host RAM cache staging failed"
+        peak_deb_gb = torch.cuda.max_memory_allocated(0) / (1024 ** 3)
+        tot_deb_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        print(f"  [DeBERTa Peak VRAM] {peak_deb_gb:.2f} GB / {tot_deb_gb:.2f} GB on cuda:0 [OK]", flush=True)
+        assert peak_deb_gb < 0.95 * tot_deb_gb, f"DeBERTa Peak VRAM ({peak_deb_gb:.2f} GB) too close to ceiling ({tot_deb_gb:.2f} GB)"
+        deb_smoke_kw.clear()
+        smoke_caches.pop("deberta", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("deberta_config", None)
+        gc.collect()
+        with torch.cuda.device(0):
+            torch.cuda.synchronize(0)
+            torch.cuda.empty_cache()
         deb_sps = getattr(train_deberta_fold, "last_throughput", 20.0)
         deb_eval_sps = 42.0
     else:
@@ -220,6 +242,8 @@ def run_dry_run_verifier():
     target_bge_dev = "cuda:1" if n_gpus >= 2 else ("cuda:0" if cuda_ok else "cpu")
     print(f"[Check 4/9] Testing BGE-large Mini-Training on GPU 1 ({target_bge_dev})...", flush=True)
     if bge_dir is not None and cuda_ok:
+        bge_gpu_idx = 1 if n_gpus >= 2 else 0
+        torch.cuda.reset_peak_memory_stats(bge_gpu_idx)
         bge_smoke_kw = {}
         if "bge" in smoke_caches:
             bge_smoke_kw["cached_enc_tr"] = smoke_caches["bge"]["tr_slice"]
@@ -233,13 +257,26 @@ def run_dry_run_verifier():
             device=target_bge_dev,
             batch_size=20, grad_accum=1, max_length=448, epochs=1,
             enable_grad_checkpointing=True,
-            group_ids_tr=group_ids[:mini_n_tr],
+            group_ids_tr=group_ids_mini_tr,
             **bge_smoke_kw,
         )
         check_finite_logits(val_bge, "BGE Val")
         check_finite_logits(test_bge, "BGE Test")
         assert val_bge.shape == (len(texts_va), NUM_CLASSES), "BGE val logits shape mismatch"
         assert test_bge.shape == (len(texts_te), NUM_CLASSES), "BGE test logits shape mismatch"
+        assert "bge" in GLOBAL_RAM_MODEL_CACHE, "BGE Host RAM cache staging failed"
+        peak_bge_gb = torch.cuda.max_memory_allocated(bge_gpu_idx) / (1024 ** 3)
+        tot_bge_gb = torch.cuda.get_device_properties(bge_gpu_idx).total_memory / (1024 ** 3)
+        print(f"  [BGE Peak VRAM] {peak_bge_gb:.2f} GB / {tot_bge_gb:.2f} GB on {target_bge_dev} [OK]", flush=True)
+        assert peak_bge_gb < 0.95 * tot_bge_gb, f"BGE Peak VRAM ({peak_bge_gb:.2f} GB) too close to ceiling ({tot_bge_gb:.2f} GB)"
+        bge_smoke_kw.clear()
+        smoke_caches.pop("bge", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge", None)
+        GLOBAL_RAM_MODEL_CACHE.pop("bge_config", None)
+        gc.collect()
+        with torch.cuda.device(bge_gpu_idx):
+            torch.cuda.synchronize(bge_gpu_idx)
+            torch.cuda.empty_cache()
         bge_sps = getattr(train_bge_fold, "last_throughput", 26.0)
         bge_eval_sps = 55.0
     else:
@@ -318,6 +355,8 @@ def run_dry_run_verifier():
     print("  Recursive multi-layer hook capture across nested PEFT/HF wrappers verified [OK]")
 
     if qwen_dir is not None and cuda_ok:
+        for gi in range(n_gpus):
+            torch.cuda.reset_peak_memory_stats(gi)
         qwen_smoke_kw = {}
         if "qwen" in smoke_caches:
             qwen_smoke_kw["cached_enc_tr"] = smoke_caches["qwen"]["tr_slice"]
@@ -330,7 +369,7 @@ def run_dry_run_verifier():
             qwen_dir, LABELS,
             batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=1,
             lora_r=48, lora_alpha=96,
-            group_ids_tr=group_ids[:mini_n_tr],
+            group_ids_tr=group_ids_mini_tr,
             retain_backbone=True,
             **qwen_smoke_kw,
         )
@@ -339,13 +378,20 @@ def run_dry_run_verifier():
         assert val_qwen.shape == (len(texts_va), NUM_CLASSES), "Qwen val logits shape mismatch"
         assert test_qwen.shape == (len(texts_te), NUM_CLASSES), "Qwen test logits shape mismatch"
         assert "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE, "Qwen retain_backbone offload to Host RAM cache failed"
+        for gi in range(n_gpus):
+            peak_q_gb = torch.cuda.max_memory_allocated(gi) / (1024 ** 3)
+            tot_q_gb = torch.cuda.get_device_properties(gi).total_memory / (1024 ** 3)
+            print(f"  [Qwen Peak VRAM GPU {gi}] {peak_q_gb:.2f} GB / {tot_q_gb:.2f} GB [OK]", flush=True)
+            assert peak_q_gb < 0.96 * tot_q_gb, f"Qwen Peak VRAM on GPU {gi} ({peak_q_gb:.2f} GB) too close to ceiling ({tot_q_gb:.2f} GB)"
+        qwen_smoke_kw.clear()
+        smoke_caches.clear()
         GLOBAL_RAM_MODEL_CACHE.pop("qwen_backbone", None)
         GLOBAL_RAM_MODEL_CACHE.pop("qwen_device_map", None)
-        GLOBAL_RAM_MODEL_CACHE.pop("deberta", None)
-        GLOBAL_RAM_MODEL_CACHE.pop("deberta_config", None)
-        GLOBAL_RAM_MODEL_CACHE.pop("bge", None)
-        GLOBAL_RAM_MODEL_CACHE.pop("bge_config", None)
         gc.collect()
+        for gi in range(n_gpus):
+            with torch.cuda.device(gi):
+                torch.cuda.synchronize(gi)
+                torch.cuda.empty_cache()
         qwen_sps = getattr(train_qwen_lora_fold, "last_throughput", 3.2 if is_qwen3 else 3.5)
         qwen_eval_sps = 12.0
     else:
@@ -383,32 +429,74 @@ def run_dry_run_verifier():
     print(f"  -> {qwen_desc} LoRA PASSED [OK] (finite logits, multi-GPU strided fusion verified)\n", flush=True)
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
-    print("[Check 6/9] Testing CPU Multiview Dual-Linear, Sibling Specialists & Subspace Projector...", flush=True)
+    print("[Check 6/9] Testing CPU Multiview Dual-Linear, External Corpus Utilization & Subspace Projector...", flush=True)
     all_raw = texts_tr + texts_va + texts_te
     n_tr = len(texts_tr)
     n_va = len(texts_va)
     style_extractor = RichStyleFeatures()
     V_dense_all = style_extractor.fit_transform(all_raw)
+    V_dense_tr = V_dense_all[:n_tr]
+    V_dense_va = V_dense_all[n_tr:n_tr + n_va]
+    V_dense_te = V_dense_all[n_tr + n_va:]
+
+    ext_mini = None
+    ext_texts_mini = None
+    V_dense_ext_mini = None
+    if ext_df is not None and len(ext_df) >= 8:
+        ext_mini = ext_df.groupby("model", group_keys=False).head(6).head(108).reset_index(drop=True)
+        ext_texts_mini = ext_mini["text"].tolist()
+        V_dense_ext_mini = style_extractor.transform(ext_texts_mini)
+
     feature_extractor = build_cpu_feature_extractor(style_weight=0.2, include_style=False)
     style_scaler = StandardScaler()
     with threadpool_limits(limits=4):
         X_tfidf_all = feature_extractor.fit_transform(all_raw)
         V_scaled_all = (0.2 * style_scaler.fit_transform(V_dense_all)).astype(np.float32)
         X_all = sp.hstack([X_tfidf_all, sp.csr_matrix(V_scaled_all)], format="csr")
+        del X_tfidf_all, V_scaled_all
         X_tr = X_all[:n_tr]
         X_va = X_all[n_tr:n_tr + n_va]
         X_te = X_all[n_tr + n_va:]
 
+        X_ext_mini = None
+        if ext_mini is not None:
+            X_tfidf_ext = feature_extractor.transform(ext_texts_mini)
+            V_scaled_ext = (0.2 * style_scaler.transform(V_dense_ext_mini)).astype(np.float32)
+            X_ext_mini = sp.hstack([X_tfidf_ext, sp.csr_matrix(V_scaled_ext)], format="csr")
+            del X_tfidf_ext, V_scaled_ext
+
         # Test prompt DF mask & active column slicing
-        pdf_mask = compute_prompt_df_mask(X_tr, group_ids[:mini_n_tr], min_prompts=1)
+        pdf_mask = compute_prompt_df_mask(X_tr, group_ids_mini_tr, min_prompts=1)
         keep_cols = np.flatnonzero(pdf_mask)
         X_tr_masked = X_tr[:, keep_cols]
         X_va_masked = X_va[:, keep_cols]
         X_te_masked = X_te[:, keep_cols]
 
+        if X_ext_mini is not None:
+            w_comp_mini, w_ext_mini = compute_fold_variance_capped_weights(
+                np.array(y_tr_str), ext_mini["model"].to_numpy(), ext_mini["_n_models"].to_numpy(),
+                n_classes=NUM_CLASSES, ext_mass_ratio=0.55, max_single_ext_weight=0.35,
+            )
+            assert np.isclose(w_comp_mini.sum() + w_ext_mini.sum(), float(n_tr), atol=1e-4), "Fold mass conservation failed"
+            X_tr_comb = sp.vstack([X_tr_masked, X_ext_mini[:, keep_cols]])
+            y_tr_comb = np.concatenate([np.array(y_tr_str), ext_mini["model"].to_numpy()])
+            w_tr_comb = np.concatenate([w_comp_mini, w_ext_mini])
+
+            V_ext_aligned = align_external_dense_moments(V_dense_tr, V_dense_ext_mini, w_ext_mini)
+            assert V_ext_aligned.shape == V_dense_ext_mini.shape and np.all(np.isfinite(V_ext_aligned)), "External dense alignment mismatch"
+            comb_V_fold = np.vstack([V_dense_tr, V_ext_aligned])
+            comb_pids_fold = np.concatenate([group_ids_mini_tr, ext_mini["prompt_id"].to_numpy()])
+            print(f"  [External Utilization] Fused {len(ext_mini)} balanced ext rows (w_sum={w_tr_comb.sum():.1f} == n_tr={n_tr}) + moment alignment [OK]")
+        else:
+            X_tr_comb = X_tr_masked
+            y_tr_comb = np.array(y_tr_str)
+            w_tr_comb = None
+            comb_V_fold = V_dense_tr
+            comb_pids_fold = group_ids_mini_tr
+
         # DualLinearClassifier (c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70 matching production)
         clf = DualLinearClassifier(c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70, seed=42, canonical_labels=LABELS)
-        clf.fit(X_tr_masked, y_tr_str)
+        clf.fit(X_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
         val_sparse_m = clf.decision_function(X_va_masked)
         test_sparse_m = clf.decision_function(X_te_masked)
 
@@ -421,32 +509,22 @@ def run_dry_run_verifier():
 
         # IntraFamilyCliqueSpecialist with single-pass delta optimization
         clique_specialist = IntraFamilyCliqueSpecialist(alpha_ridge=1.0, beta_refine=0.25, seed=42)
-        clique_specialist.fit(X_tr_masked, y_tr_str)
+        clique_specialist.fit(X_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
         y_va_int = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
         deltas_va = clique_specialist._compute_sibling_deltas(X_va_masked, val_sparse_m.shape[0], val_sparse_m.shape[1])
         opt_beta = clique_specialist.optimize_beta(val_sparse_m, X_va_masked, y_va_int, precomputed_deltas=deltas_va)
         val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_masked, beta=opt_beta, precomputed_deltas=deltas_va)
         test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_masked, beta=opt_beta)
 
-        # Dense Stylometrics & StyleInvariantSubspaceProjector (single-pass upfront computation matching Step 1)
-        V_dense_tr = V_dense_all[:n_tr]
-        V_dense_va = V_dense_all[n_tr:n_tr + n_va]
-        V_dense_te = V_dense_all[n_tr + n_va:]
-        if ext_df is not None and len(ext_df) >= 8:
-            n_ext_mini = min(16, len(ext_df))
-            V_ext_mini = style_extractor.transform(ext_df["text"].iloc[:n_ext_mini].tolist())
-            w_ext_mini = ext_weights[:n_ext_mini] if ext_weights is not None else np.ones(n_ext_mini, dtype=np.float32)
-            V_ext_aligned = align_external_dense_moments(V_dense_tr, V_ext_mini, w_ext_mini)
-            assert V_ext_aligned.shape == V_ext_mini.shape and np.all(np.isfinite(V_ext_aligned)), "External dense alignment mismatch"
-            print("  [External Moment Alignment] align_external_dense_moments verified [OK]")
+        # Dense Stylometrics & StyleInvariantSubspaceProjector
         subspace_proj = StyleInvariantSubspaceProjector(n_topic_components=4, attenuation=0.75)
-        subspace_proj.fit(V_dense_tr, group_ids[:mini_n_tr], y_labels=y_tr_str)
-        V_dense_tr_proj = subspace_proj.transform(V_dense_tr)
+        subspace_proj.fit(comb_V_fold, comb_pids_fold, y_labels=y_tr_comb)
+        V_dense_tr_proj = subspace_proj.transform(comb_V_fold)
         V_dense_va_proj = subspace_proj.transform(V_dense_va)
         V_dense_te_proj = subspace_proj.transform(V_dense_te)
 
         dense_clf = DenseStylometricClassifier(c=0.2, seed=42, canonical_labels=LABELS)
-        dense_clf.fit(V_dense_tr_proj, y_tr_str)
+        dense_clf.fit(V_dense_tr_proj, y_tr_comb, sample_weight=w_tr_comb)
         p_dense_va = dense_clf.predict_proba(V_dense_va_proj)
         p_dense_te = dense_clf.predict_proba(V_dense_te_proj)
         if hasattr(dense_clf, "expander_") and dense_clf.expander_ is not None:
@@ -465,6 +543,16 @@ def run_dry_run_verifier():
 
         check_finite_logits(val_svm, "CPU linear val logits")
         check_finite_logits(test_svm, "CPU linear test logits")
+
+    # Release Check 6 matrices and full external dataframe cleanly from Host RAM
+    del clf, dense_clf, clique_specialist, subspace_proj, feature_extractor, style_scaler, style_extractor
+    del X_all, X_tr, X_va, X_te, X_tr_masked, X_va_masked, X_te_masked, X_tr_comb, V_dense_all
+    if ext_mini is not None:
+        del ext_mini, X_ext_mini, V_ext_aligned, comb_V_fold
+    if ext_df is not None:
+        ext_df = None
+        ext_weights = None
+    gc.collect()
 
     # Modeling full production CPU linear + specialists with external data (N_comb = 26,184 rows)
     # After keep_cols pruning, float32 FeatureUnion, solver='lsqr' tol=5e-3, and single-pass deltas
@@ -623,7 +711,12 @@ def run_dry_run_verifier():
                     torch.cuda.empty_cache()
         oom_recovered = True
     assert oom_recovered, "OOM recovery handler failed"
-    print("    -> OOM / RuntimeError safely caught; memory evacuation verified [OK]")
+    assert len(GLOBAL_RAM_MODEL_CACHE) == 0, f"Host RAM model cache leaked keys: {list(GLOBAL_RAM_MODEL_CACHE.keys())}"
+    if cuda_ok:
+        for gi in range(n_gpus):
+            alloc_gb = torch.cuda.memory_allocated(gi) / (1024 ** 3)
+            assert alloc_gb < 0.5, f"GPU {gi} retained {alloc_gb:.2f} GB after cleanup!"
+    print("    -> OOM / RuntimeError caught & Host RAM / GPU VRAM zero-leak state verified [OK]")
 
     # 8.2: Universal Quality Gate Degradation & NaN Detection
     print("  [8.2] Testing Universal Quality Gate on degenerate / chance / NaN streams...", flush=True)

@@ -231,10 +231,70 @@ def test_5_run_quad_ensemble_partial_and_na_ids():
     print("[PASS] Test 5: run_quad_ensemble end-to-end with string id='NA' & NaN prompt_id")
 
 
+def test_6_external_discovery_and_schema_resilience():
+    import os
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        comp_dir = tmp_path / "competitions" / "name-that-llm"
+        ext_dir = tmp_path / "datasets" / "owner" / "ext-pack"
+        work_dir = tmp_path / "work"
+        comp_dir.mkdir(parents=True)
+        ext_dir.mkdir(parents=True)
+        work_dir.mkdir(parents=True)
+
+        # Competition CSVs + distracting incompatible parquets
+        comp_df = pd.DataFrame([
+            {"id": f"c_{i}", "prompt_id": f"cp_{i // NUM_CLASSES}", "text": f"comp {LABELS[i % NUM_CLASSES]} {i}", "model": LABELS[i % NUM_CLASSES]}
+            for i in range(36)
+        ])
+        comp_df.to_csv(comp_dir / "train.csv", index=False)
+        pd.DataFrame([{"id": f"t_{i}", "text": "test row"} for i in range(5)]).to_csv(comp_dir / "test.csv", index=False)
+        pd.DataFrame([{"id": "x", "wrong_col": 1}]).to_parquet(tmp_path / "external_junk.parquet", index=False)
+
+        # Wide external WITHOUT 'id' column (uses auto-id)
+        wide_path = ext_dir / "custom_multi_llm.parquet"
+        wide_row = {lbl: f"wide text {lbl}" for lbl in LABELS}
+        pd.DataFrame([wide_row, wide_row]).to_parquet(wide_path, index=False)
+
+        old_env = {k: os.environ.get(k) for k in ("NTL_DATA_DIR", "NTL_WORKING", "NTL_EXT_PATH")}
+        try:
+            os.environ["NTL_DATA_DIR"] = str(tmp_path)
+            os.environ["NTL_WORKING"] = str(work_dir)
+            os.environ.pop("NTL_EXT_PATH", None)
+            _, _, _, _, found_ext, _ = kte.discover_paths()
+            assert found_ext is not None and Path(found_ext) == wide_path, f"Expected {wide_path}, got {found_ext}"
+
+            comb_w, w_w = kte.build_mass_balanced_external_corpus(comp_df, found_ext, LABELS)
+            assert len(comb_w) == len(comp_df) + 2 * NUM_CLASSES
+            assert np.isclose(w_w.sum(), float(len(comp_df)), atol=1e-4)
+
+            # Long external schema override via NTL_EXT_PATH
+            long_path = ext_dir / "ext_long_pack.parquet"
+            long_df = pd.DataFrame([
+                {"prompt_id": f"lp_{i}", "model": LABELS[i % NUM_CLASSES], "text": f"long sample {i}"}
+                for i in range(NUM_CLASSES * 2)
+            ])
+            long_df.to_parquet(long_path, index=False)
+            os.environ["NTL_EXT_PATH"] = str(long_path)
+            _, _, _, _, found_long, _ = kte.discover_paths()
+            assert found_long is not None and Path(found_long) == long_path
+            comb_l, w_l = kte.build_mass_balanced_external_corpus(comp_df, found_long, LABELS)
+            assert len(comb_l) == len(comp_df) + len(long_df)
+            assert np.isclose(w_l.sum(), float(len(comp_df)), atol=1e-4)
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+    print("[PASS] Test 6: Nested external discovery, junk rejection & wide/long schema resilience")
+
+
 if __name__ == "__main__":
     test_1_prompt_groups_nan_and_empty_ids()
     test_2_single_class_clique_and_tiny_subspace()
     test_3_blend_and_quad_rank_with_none_svm()
     test_4_dry_run_cache_slicing_and_tiny_hf_fold_lifecycle()
     test_5_run_quad_ensemble_partial_and_na_ids()
-    print("\nALL 5 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")
+    test_6_external_discovery_and_schema_resilience()
+    print("\nALL 6 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")

@@ -420,22 +420,44 @@ def build_mass_balanced_external_corpus(
     wide = pd.read_parquet(ext_wide_path)
     model_cols = [c for c in labels if c in wide.columns]
 
-    # Count how many models answered each external prompt (reward multi-model contrastive rows)
-    wide["_n_models"] = wide[model_cols].notna().sum(axis=1)
+    if len(model_cols) >= 2:
+        # Wide format (1 row per prompt, 1 column per model)
+        if "id" not in wide.columns:
+            if "prompt_id" in wide.columns:
+                wide["id"] = wide["prompt_id"].astype(str)
+            else:
+                wide["id"] = [f"wrow_{i}" for i in range(len(wide))]
+        wide["_n_models"] = wide[model_cols].notna().sum(axis=1)
+        ext_long = wide.melt(
+            id_vars=["id", "_n_models"],
+            value_vars=model_cols,
+            var_name="model",
+            value_name="text",
+        ).dropna(subset=["text"]).reset_index(drop=True)
+        ext_long["prompt_id"] = "ext_" + ext_long["id"].astype(str)
+    elif "model" in wide.columns and "text" in wide.columns:
+        # Long format fallback (e.g., clean_corpus_long.parquet)
+        ext_long = wide[wide["model"].isin(labels)].dropna(subset=["text"]).copy().reset_index(drop=True)
+        if "prompt_id" in ext_long.columns:
+            raw_pid = ext_long["prompt_id"].fillna("").astype(str)
+            pid_vals = [p if p else f"lrow_{i}" for i, p in enumerate(raw_pid)]
+        elif "id" in ext_long.columns:
+            pid_vals = ext_long["id"].astype(str).tolist()
+        else:
+            pid_vals = [f"lrow_{i}" for i in range(len(ext_long))]
+        ext_long["prompt_id"] = ["ext_" + p for p in pid_vals]
+        if "_n_models" not in ext_long.columns:
+            ext_long["_n_models"] = ext_long.groupby("prompt_id")["model"].transform("nunique")
+    else:
+        raise ValueError(f"Unsupported external corpus schema at {ext_wide_path}: columns={list(wide.columns)[:12]}")
 
-    ext_long = wide.melt(
-        id_vars=["id", "_n_models"],
-        value_vars=model_cols,
-        var_name="model",
-        value_name="text",
-    ).dropna(subset=["text"]).reset_index(drop=True)
+    del wide
 
     # Clean text and strip NUL bytes
     ext_long["text"] = ext_long["text"].apply(clean_text)
     ext_long = ext_long[ext_long["text"].str.len() > 0].reset_index(drop=True)
-
-    # Namespace prompt IDs to avoid collision with competition prompt_id
-    ext_long["prompt_id"] = "ext_" + ext_long["id"].astype(str)
+    if len(ext_long) == 0:
+        raise ValueError(f"External corpus at {ext_wide_path} produced 0 valid rows after cleaning.")
 
     label_to_id = {m: i for i, m in enumerate(labels)}
     ext_long["label"] = ext_long["model"].map(label_to_id)
@@ -1495,7 +1517,17 @@ def discover_paths():
     parquets = []
     if input_root.exists():
         skip_dirs = {".git", "__pycache__", ".ipynb_checkpoints", ".mypy_cache", ".ruff_cache"}
-        for root_dir, dirnames, filenames in os.walk(input_root):
+        seen_inodes = set()
+        for root_dir, dirnames, filenames in os.walk(input_root, followlinks=True):
+            try:
+                st = os.stat(root_dir)
+                inode = (st.st_dev, st.st_ino)
+                if inode in seen_inodes:
+                    dirnames[:] = []
+                    continue
+                seen_inodes.add(inode)
+            except OSError:
+                pass
             dirnames[:] = [d for d in dirnames if d not in skip_dirs]
             for fname in filenames:
                 if fname == "config.json":
@@ -1545,31 +1577,61 @@ def discover_paths():
         deberta_candidates.sort(key=lambda x: x[0])
         deberta_dir = deberta_candidates[0][1]
 
+    def _inspect_external_parquet(p_cand: Path) -> int:
+        """Returns format tier: 2=wide schema (>=2 label cols), 1=long schema ('model'+'text'), 0=incompatible."""
+        try:
+            try:
+                import pyarrow.parquet as pq
+                cols = set(pq.read_schema(p_cand).names)
+            except Exception:
+                cols = set(pd.read_parquet(p_cand).columns)
+            if sum(1 for lbl in LABELS if lbl in cols) >= 2:
+                return 2
+            if "model" in cols and "text" in cols:
+                return 1
+        except Exception:
+            pass
+        return 0
+
     ext_path = None
-    for cand in [
-        input_root / "datasets/external_short_wide.parquet",
-        input_root / "external_short_wide.parquet",
-        Path("datasets/external_short_wide.parquet"),
-        Path("data/external_short_wide.parquet"),
-    ]:
-        if cand.is_file():
-            ext_path = cand
-            break
+    env_ext = os.environ.get("NTL_EXT_PATH")
+    if env_ext and Path(env_ext).is_file() and _inspect_external_parquet(Path(env_ext)) > 0:
+        ext_path = Path(env_ext)
 
     if ext_path is None:
-        for p in parquets:
-            if p.name == "external_short_wide.parquet" and p.is_file():
-                ext_path = p
+        # Prioritize exact external_short_wide.parquet inside attached Kaggle datasets first, then repo defaults
+        exact_matches = [p for p in parquets if p.name == "external_short_wide.parquet" and p.is_file()]
+        for cand in exact_matches + [
+            input_root / "datasets/external_short_wide.parquet",
+            input_root / "external_short_wide.parquet",
+            Path("datasets/external_short_wide.parquet"),
+            Path("data/external_short_wide.parquet"),
+            Path("/kaggle/working/external_short_wide.parquet"),
+        ]:
+            if cand.is_file() and _inspect_external_parquet(cand) > 0:
+                ext_path = cand
                 break
 
     if ext_path is None:
-        for p in parquets:
+        ext_candidates = []
+        extra_parquets = list(parquets)
+        if not Path("/kaggle/input").exists():
+            for d_fallback in (Path("datasets"), Path("data/processed")):
+                if d_fallback.is_dir():
+                    extra_parquets.extend(sorted(d_fallback.glob("*.parquet")))
+        for p in extra_parquets:
             p_path_str = str(p).lower()
-            if "submission" in p_path_str or "working" in p_path_str:
+            if any(bad in p_path_str for bad in ("submission", "working", "test_holdout", "sample")):
                 continue
-            if any(k in p_path_str for k in ("external", "wide", "short", "corpus", "response", "pool")):
-                ext_path = p
-                break
+            tier = _inspect_external_parquet(p)
+            if tier == 0:
+                continue
+            name_bonus = 2 if any(k in p_path_str for k in ("external", "wide", "short", "corpus", "response", "pool")) else 0
+            # Prefer higher schema tier (wide > long), naming match, then shallower path
+            ext_candidates.append((-(tier * 10 + name_bonus), len(p.parts), p))
+        if ext_candidates:
+            ext_candidates.sort(key=lambda x: (x[0], x[1]))
+            ext_path = ext_candidates[0][2]
 
     deb_variant = "large" if deberta_dir and "large" in str(deberta_dir).lower() else "base/unknown"
     qwen_variant = "qwen-3-8b" if qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()) else ("qwen-2.5-7b" if qwen_dir and "2.5" in str(qwen_dir).lower() else "custom/unknown")
@@ -4324,10 +4386,11 @@ def run_quad_ensemble():
                 train_df, ext_path, LABELS, ext_mass_ratio=0.55, prefer_multi_model=True
             )
             ext_slice = comb_ext_df.iloc[len(train_df):].reset_index(drop=True)
+            del comb_ext_df
             ext_df = ext_slice
             ext_texts = ext_slice["text"].tolist()
             ext_prompt_ids = ext_slice["prompt_id"].to_numpy()
-            print(f"  [External Data] Loaded {len(ext_texts):,} passages across 18 classes (Mass ratio=0.55, 0.0% prior skew) [OK]", flush=True)
+            print(f"  [External Data] Loaded {len(ext_texts):,} passages across {ext_slice['model'].nunique()} classes (Mass ratio=0.55, 0.0% prior skew) [OK]", flush=True)
         except Exception as e:
             print(f"  [External Data] Warning: Failed to load external data: {e}. Falling back to competition data.", flush=True)
             ext_df = None

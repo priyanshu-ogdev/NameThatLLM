@@ -2237,6 +2237,7 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
                 set_model_pooler_mask(model, None)
                 if pooler is not None:
                     pooler._extra_layers = None
+                logits = kw = padded = None
                 all_logits.clear()
                 gc.collect()
                 if cuda_ok:
@@ -2379,11 +2380,14 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
                             all_logits.append(logits)
                 break
             except torch.cuda.OutOfMemoryError:
+                captured_hs.clear()
+                out = h_input = logits = batch_kwargs = padded = None
                 all_logits.clear()
                 gc.collect()
                 if cuda_ok:
                     for gi in range(torch.cuda.device_count()):
                         with torch.cuda.device(gi):
+                            torch.cuda.synchronize(gi)
                             torch.cuda.empty_cache()
                 if inf_bs <= 1:
                     raise
@@ -2511,6 +2515,8 @@ def _train_transformer_fold_impl(
             model = AutoModelForSequenceClassification.from_pretrained(
                 model_dir, num_labels=len(labels), id2label=id2label, label2id=label2id, local_files_only=True
             )
+        if len(tokenizer) > model.get_input_embeddings().weight.shape[0]:
+            model.resize_token_embeddings(len(tokenizer))
         model.load_state_dict(cached_weights, strict=False)
     else:
         with HeartbeatTimer(f"Reading {model_name} from disk onto {dev}"):
@@ -3395,10 +3401,8 @@ def _train_qwen_lora_fold_impl(
                         print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
                         if n_oom_skips > 5:
                             raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
-                        try:
-                            del logits, loss, batch_kwargs, batch_labels
-                        except Exception:
-                            pass
+                        captured_hs.clear()
+                        out = h_input = logits = loss = batch_kwargs = batch_labels = None
                         optimizer.zero_grad(set_to_none=True)
                         accumulated_steps = 0
                         if cuda_ok:

@@ -76,8 +76,13 @@ def bootstrap_offline_wheels():
     for root in input_roots:
         if root.exists():
             try:
-                for whl in root.rglob("transformers*.whl"):
-                    wheel_dirs.add(whl.parent)
+                root_depth = len(root.parts)
+                for cur_root, dirs, files in os.walk(root):
+                    cur_depth = len(Path(cur_root).parts) - root_depth
+                    dirs[:] = [d for d in dirs if not d.startswith(".")] if cur_depth < 3 else []
+                    for fname in files:
+                        if fname.startswith("transformers") and fname.endswith(".whl"):
+                            wheel_dirs.add(Path(cur_root))
             except Exception:
                 pass
 
@@ -2634,9 +2639,8 @@ def _train_transformer_fold_impl(
                             print(f"  [{model_name}] Warning: NaN/Inf loss in micro-step {micro_step}. Skipping micro-batch ({n_skipped_micros} total skips).", flush=True)
                             if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
                                 raise FloatingPointError(f"[{model_name}] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Unstable FP16 training detected; discarding fold.")
-                            if accumulated_steps > 0:
-                                optimizer.zero_grad(set_to_none=True)
-                                accumulated_steps = 0
+                            optimizer.zero_grad(set_to_none=True)
+                            accumulated_steps = 0
                             continue
 
                     except torch.cuda.OutOfMemoryError:
@@ -2716,6 +2720,10 @@ def _train_transformer_fold_impl(
 
         avg_loss = running_loss / max(n_micro, 1)
 
+        if stop_early and n_total_micros_executed == 0:
+            print(f"  [{model_name}] Time Guard triggered before any gradient step in Ep {epoch+1}; skipping untrained fold eval.", flush=True)
+            break
+
         val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
         val_preds = np.argmax(val_logits, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
@@ -2774,7 +2782,7 @@ def _train_transformer_fold_impl(
     elif best_state is not None:
         model.load_state_dict({k: v.to(dev) for k, v in best_state.items()}, strict=False)
 
-    test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels), enc_data_tta=cached_enc_te_tta)
+    test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels), enc_data_tta=cached_enc_te_tta) if best_val_logits is not None else None
 
     set_model_pooler_mask(model, None)
     del model, optimizer, scheduler, epoch_states
@@ -3184,9 +3192,8 @@ def _train_qwen_lora_fold_impl(
                             print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
                             if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
                                 raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
-                            if accumulated_steps > 0:
-                                optimizer.zero_grad(set_to_none=True)
-                                accumulated_steps = 0
+                            optimizer.zero_grad(set_to_none=True)
+                            accumulated_steps = 0
                             continue
 
                     except torch.cuda.OutOfMemoryError:
@@ -3267,6 +3274,9 @@ def _train_qwen_lora_fold_impl(
             accumulated_steps = 0
 
         avg_loss = epoch_loss / max(n_batches, 1)
+        if stop_early and n_total_micros_executed == 0:
+            print(f"  [Qwen LoRA] Time Guard triggered before any gradient step in Ep {epoch+1}; skipping untrained fold eval.", flush=True)
+            break
         val_logits = evaluate_qwen_split(backbone, head, enc_va, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
         val_preds = np.argmax(val_logits, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
@@ -3302,14 +3312,16 @@ def _train_qwen_lora_fold_impl(
             swa_w = swa_w / swa_w.sum()
             swa_lora = {}
             for k in epoch_lora_states[0]:
-                view_shape = [-1] + [1] * epoch_lora_states[0][k].ndim
-                w = swa_w.view(*view_shape)
-                swa_lora[k] = (torch.stack([s[k] for s in epoch_lora_states]) * w).sum(dim=0)
+                acc = epoch_lora_states[0][k] * float(swa_w[0])
+                for idx_s in range(1, len(epoch_lora_states)):
+                    acc = acc + epoch_lora_states[idx_s][k] * float(swa_w[idx_s])
+                swa_lora[k] = acc
             swa_head = {}
             for k in epoch_head_states[0]:
-                view_shape = [-1] + [1] * epoch_head_states[0][k].ndim
-                w = swa_w.view(*view_shape)
-                swa_head[k] = (torch.stack([s[k] for s in epoch_head_states]) * w).sum(dim=0)
+                acc = epoch_head_states[0][k] * float(swa_w[0])
+                for idx_s in range(1, len(epoch_head_states)):
+                    acc = acc + epoch_head_states[idx_s][k] * float(swa_w[idx_s])
+                swa_head[k] = acc
 
             backbone.load_state_dict(swa_lora, strict=False)
             head.load_state_dict(swa_head)
@@ -3338,7 +3350,7 @@ def _train_qwen_lora_fold_impl(
         if best_head_state is not None:
             head.load_state_dict(best_head_state)
 
-    test_logits = evaluate_qwen_split(backbone, head, enc_te, tokenizer, first_dev, head_dev, cuda_ok, len(labels), enc_data_tta=cached_enc_te_tta)
+    test_logits = evaluate_qwen_split(backbone, head, enc_te, tokenizer, first_dev, head_dev, cuda_ok, len(labels), enc_data_tta=cached_enc_te_tta) if best_val_logits is not None else None
 
     del head, optimizer, scheduler, epoch_lora_states, epoch_head_states
     if "swa_lora" in locals():

@@ -59,7 +59,7 @@ $$\boldsymbol{\mu}_p = \mathbf{e}_{\text{topic}(p)} + \frac{1}{|M_p|} \sum_{m \i
 Computing SVD on uncentered centroids extracts the head-vs-tail style difference (Claude/GPT vs Gemini) and attenuates it, erasing up to 15% of true stylistic separation!
 
 **The Fix (Class-Demeaned SVD Centroids)**:
-In [`StyleInvariantSubspaceProjector.fit(X, prompt_ids, y_labels)`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.py#L1222), subtract each class's global mean style vector $\bar{\mathbf{x}}_c$ from $\mathbf{X}$ *before* computing prompt centroids:
+In [`StyleInvariantSubspaceProjector.fit(X, prompt_ids, y_labels)`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.py#L1320), subtract each class's global mean style vector $\bar{\mathbf{x}}_c$ from $\mathbf{X}$ *before* computing prompt centroids:
 
 $$\mathbf{X}_{\text{res}}[i] = \mathbf{X}[i] - \bar{\mathbf{x}}_{y_i}, \qquad \boldsymbol{\mu}_p = \frac{1}{|M_p|} \sum_{m \in M_p} \mathbf{X}_{\text{res}}[p, m]$$
 
@@ -85,7 +85,7 @@ $$\tilde{\mathbf{V}}_{\text{ext}} = \left(\frac{\mathbf{V}_{\text{ext}} - \bolds
 
 An 18-class global classifier under-allocates capacity to distinguishing near-identical siblings.
 
-**The Fix ([`IntraFamilyCliqueSpecialist`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.py#L1138))**:
+**The Fix ([`IntraFamilyCliqueSpecialist`](file:///d:/NameThatLLM/notebooks/kaggle_tri_ensemble.py#L1225))**:
 - Trains 4 fast RidgeClassifiers dedicated exclusively to the rows of each multi-model family clique (Anthropic-5, Google-4, OpenAI-5, Zhipu-2) on the combined 26,724-sample corpus.
 - Refines global decision margins using zero-mean centered conditional log-probabilities:
   $$z_m \leftarrow z_m + \beta \cdot \log \tilde{P}_{\text{sibling}}(m \mid \text{family}, x), \quad \beta = 0.25$$
@@ -117,9 +117,9 @@ In your Kaggle notebook's **Add Input** sidebar, attach the following 6 datasets
 | **RAM & Sibling Suite** | [`scripts/test_ram_and_sibling_upgrades.py`](file:///d:/NameThatLLM/scripts/test_ram_and_sibling_upgrades.py) | 8 | **100% PASSED** | Sibling difficulty margins, 1,835-dim Kernel Expander, paired microbatching, `GLOBAL_RAM_MODEL_CACHE`, `FastBatchPrefetcher`. |
 | **Spike & Gap + Hooks Suite** | [`scripts/test_spike_and_gap_head.py`](file:///d:/NameThatLLM/scripts/test_spike_and_gap_head.py) | All | **100% PASSED** | `SpikeAndGapHierarchicalHead`, 4-moment pooler, recursive PEFT multi-layer hook traversal (`_find_layers`). |
 | **V6 Architecture Tests** | [`scripts/test_v6_upgrades.py`](file:///d:/NameThatLLM/scripts/test_v6_upgrades.py) | 3 groups | **100% PASSED** | Spike & Gap multi-layer fusion, temperature-smoothed family loss, nested 5-fold CV meta-combiner (`cv_score=0.7515`). |
-| **9-Check Dry Run** | [`notebooks/kaggle_dry_run.py`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.py) | 9 | **100% PASSED** | Full hardware, RAM cache, multi-layer hooks, 145-dim CPU expander, Sinkhorn/Meta-CV, fault tolerance & 5.78h budget matrix. |
-| **Notebook Parity** | [`scripts/verify_notebook_parity.py`](file:///d:/NameThatLLM/scripts/verify_notebook_parity.py) | 1 | **100% MATCH** | Exact byte match (**183,229 chars, 3,937 shared lines**) between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py`. |
+| **9-Check Dry Run** | [`notebooks/kaggle_dry_run.py`](file:///d:/NameThatLLM/notebooks/kaggle_dry_run.py) | 9 | **100% PASSED** | Full hardware, RAM cache, multi-layer hooks, 145-dim CPU expander, Sinkhorn/Meta-CV, fault tolerance & 5.14h–6.00h budget matrix. |
+| **Notebook Parity** | [`scripts/verify_notebook_parity.py`](file:///d:/NameThatLLM/scripts/verify_notebook_parity.py) | 1 | **100% MATCH** | Exact byte match (**190,581 chars, 4,121 shared lines**) between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py`. |
 | **Ruff Linter** | [`scripts/check_ruff.py`](file:///d:/NameThatLLM/scripts/check_ruff.py) | All | **0 ERRORS** | Codebase passes lint (`F401, F811, F821, F841`) across production, `src/ntl/`, and active test suites. |
-| **Notebook Rebuild** | [`scripts/rebuild_notebooks.py`](file:///d:/NameThatLLM/scripts/rebuild_notebooks.py) | 2 | **REBUILT** | Rebuilt `kaggle_tri_ensemble.ipynb` (4,742 file lines) and `kaggle_dry_run.ipynb` (4,784 file lines). |
+| **Notebook Rebuild** | [`scripts/rebuild_notebooks.py`](file:///d:/NameThatLLM/scripts/rebuild_notebooks.py) | 2 | **REBUILT** | Rebuilt `kaggle_tri_ensemble.ipynb` (4,930 file lines) and `kaggle_dry_run.ipynb` (4,969 file lines). |
 
 See [`docs/15_FORENSIC_AUDIT_AND_LATENCY_OPTIMIZATION_REPORT.md`](file:///d:/NameThatLLM/docs/15_FORENSIC_AUDIT_AND_LATENCY_OPTIMIZATION_REPORT.md) for the complete latency, structural hardening, and Fold 1 $\to$ Fold 2 HF verification report.

@@ -87,10 +87,10 @@ qwen_ga = 2 if is_qwen3 else 1
 ## 4. Verification & Parity Audit
 
 The pipeline has been verified with 100% test passing:
-- **100% Byte Parity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact code parity (**183,229 characters, 3,937 shared lines**).
+- **100% Byte Parity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact code parity (**190,581 characters, 4,121 shared lines**).
 - **Clean AST & Lint**: 0 syntax errors, 0 Ruff errors across production scripts, `src/ntl/`, and active test suites.
 - **Notebooks Rebuilt**:
-  - `notebooks/kaggle_dry_run.ipynb` (4,784 file lines / 4,747 code lines)
-  - `notebooks/kaggle_tri_ensemble.ipynb` (4,742 file lines / 4,705 code lines)
+  - `notebooks/kaggle_dry_run.ipynb` (4,969 file lines / 4,932 code lines)
+  - `notebooks/kaggle_tri_ensemble.ipynb` (4,930 file lines / 4,893 code lines)
 - **Comprehensive Verification Passed**: All 9 pre-flight checks + 20 negative stress tests + 6 external data tests + 8 RAM/sibling tests + real HF Fold 1->2 multi-fold training tests (`BertForSequenceClassification` + `Qwen2Model` PEFT) passed with 100% success.
 

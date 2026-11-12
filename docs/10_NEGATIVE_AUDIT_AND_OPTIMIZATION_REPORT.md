@@ -390,12 +390,12 @@ While the class names match 18/18, forensic inspection of `external_short_wide.p
 ## 📈 Parity, Code Quality & Projected Trajectory
 
 ### Codebase Parity Metrics
-- **Shared Code Identity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact byte parity (**183,229 characters, 3,937 lines**).
+- **Shared Code Identity**: `notebooks/kaggle_tri_ensemble.py` and `notebooks/kaggle_dry_run.py` share exact byte parity (**190,581 characters, 4,121 lines**).
 - **Ruff Linter**: 0 errors across production scripts, `src/ntl/`, and active test suites.
 - **Python AST Parse**: 100% valid syntax without deprecation warnings.
 - **Synchronized Notebooks**:
-   - `kaggle_dry_run.ipynb`: 4,784 file lines (4,747 code lines)
-   - `kaggle_tri_ensemble.ipynb`: 4,742 file lines (4,705 code lines)
+   - `kaggle_dry_run.ipynb`: 4,969 file lines (4,932 code lines)
+   - `kaggle_tri_ensemble.ipynb`: 4,930 file lines (4,893 code lines)
 
 ### Benchmark Trajectory
 

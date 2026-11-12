@@ -20,7 +20,7 @@ Two validated submission approaches are provided:
 ├───────────────────────────────────────────────────────────────┤
 │ Route D: Frontier Quad-Model Production Pipeline (V6 Gold)    │
 │ • Notebook: notebooks/kaggle_tri_ensemble.ipynb / .py         │
-│ • Accelerator: Dual Tesla T4 (GPU T4 x2) | Runtime: ~4.9–5.8h  │
+│ • Accelerator: Dual Tesla T4 (GPU T4 x2) | Runtime: ~5.1–6.0h  │
 │ • Inputs: DeBERTa-v3 + BGE-large + Qwen 3 8B / 2.5 + External │
 │ • Target Score: 0.780 – 0.805+ Macro Balanced Accuracy        │
 └───────────────────────────────────────────────────────────────┘
@@ -126,7 +126,7 @@ When executed, the pipeline sequentially advances through 5 clean stages:
 
 #### 4. Save and Submit:
 1. Click **Save Version** -> **Save & Run All (Commit)**.
-2. The notebook runs in approximately **4.92–5.78 hours** (295.2 min Dual-GPU concurrent / 346.8 min conservative upper bound with 2x TTA), leaving **+2.42h to +3.28h** below the 8.2-hour internal guard and **+3.22h to +4.08h** below Kaggle's 9.0-hour wall-clock timeout.
+2. The notebook runs in approximately **5.14–6.00 hours** (308.3 min Dual-GPU concurrent / 359.9 min conservative upper bound with 2x TTA), leaving **+2.20h to +3.06h** below the 8.2-hour internal guard and **+3.00h to +3.86h** below Kaggle's 9.0-hour wall-clock timeout.
 3. Once completed, navigate to the notebook version, locate `submission.parquet`, and click **Submit to Competition**.
 
 ---

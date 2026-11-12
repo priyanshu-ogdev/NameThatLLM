@@ -197,6 +197,6 @@ Alternates row and column normalizations until relative change $< 10^{-3}$, perf
 | **Upgrade 2 & V6 Math** | Variance capping ($\le 0.35$), Kish ESS math, LDAM margin ($2.88\times$), SVD class demeaning, Moment alignment, Clique specialists | 6 | **100% Passed** |
 | **Negative Stress Tests** | Empty slices, single-row test, NaN/Inf traps, submission schema assertion, FocalLoss autograd | 20 | **100% Passed** |
 | **RAM & Sibling Suite** | Sibling difficulty margins, 1,835-dim Kernel Expander, paired microbatching, `GLOBAL_RAM_MODEL_CACHE`, `FastBatchPrefetcher` | 8 | **100% Passed** |
-| **9-Check Dry Run** | Hardware, token/TTA cache, DeBERTa/BGE/Qwen2 hooks, 145-dim CPU expander, Sinkhorn/Meta-CV, fault tolerance, 5.78h budget | 9 | **100% Passed** |
-| **Notebook Parity** | Exact byte match between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py` | 1 | **100% Match (183,229 chars, 3,937 lines)** |
+| **9-Check Dry Run** | Hardware, token/TTA cache, DeBERTa/BGE/Qwen2 hooks, 145-dim CPU expander, Sinkhorn/Meta-CV, fault tolerance, 5.14h–6.00h budget | 9 | **100% Passed** |
+| **Notebook Parity** | Exact byte match between `kaggle_tri_ensemble.py` and `kaggle_dry_run.py` | 1 | **100% Match (190,581 chars, 4,121 lines)** |
 | **Ruff Linter** | Complete syntax, unused import/variable, and undefined-name audit | All | **0 Errors** |

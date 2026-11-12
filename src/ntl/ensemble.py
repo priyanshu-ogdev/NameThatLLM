@@ -92,7 +92,7 @@ def rank_blend(
     total_ranks = np.zeros_like(margins_list[0], dtype=np.float64)
     for m, w in zip(margins_list, weights):
         if m is not None:
-            total_ranks += w * np.apply_along_axis(rankdata, 1, m)
+            total_ranks += w * rankdata(m, axis=1)
 
     if tie_break_margins is not None:
         ptp = np.ptp(tie_break_margins, axis=1, keepdims=True)

@@ -417,7 +417,14 @@ def build_mass_balanced_external_corpus(
     Namespaces external prompt IDs ('ext_{id}') to prevent prompt collisions.
     Strips NUL bytes and cleans whitespace.
     """
-    wide = pd.read_parquet(ext_wide_path)
+    ext_p = Path(ext_wide_path)
+    suffix = ext_p.suffix.lower()
+    if suffix == ".csv":
+        wide = pd.read_csv(ext_p)
+    elif suffix in (".jsonl", ".ndjson"):
+        wide = pd.read_json(ext_p, lines=True)
+    else:
+        wide = pd.read_parquet(ext_p)
     model_cols = [c for c in labels if c in wide.columns]
 
     if len(model_cols) >= 2:
@@ -456,6 +463,10 @@ def build_mass_balanced_external_corpus(
     # Clean text and strip NUL bytes
     ext_long["text"] = ext_long["text"].apply(clean_text)
     ext_long = ext_long[ext_long["text"].str.len() > 0].reset_index(drop=True)
+    if len(ext_long) > 50_000:
+        # Filter oversized uncurated wide dumps (e.g., external_all_wide) to the competition 40-300 word window
+        wc = ext_long["text"].str.split().str.len()
+        ext_long = ext_long[(wc >= 40) & (wc <= 300)].reset_index(drop=True)
     if len(ext_long) == 0:
         raise ValueError(f"External corpus at {ext_wide_path} produced 0 valid rows after cleaning.")
 
@@ -1515,27 +1526,29 @@ def discover_paths():
 
     configs = []
     parquets = []
+    ext_tables = []
     if input_root.exists():
         skip_dirs = {".git", "__pycache__", ".ipynb_checkpoints", ".mypy_cache", ".ruff_cache"}
-        seen_inodes = set()
+        seen_realpaths = set()
         for root_dir, dirnames, filenames in os.walk(input_root, followlinks=True):
-            try:
-                st = os.stat(root_dir)
-                inode = (st.st_dev, st.st_ino)
-                if inode in seen_inodes:
-                    dirnames[:] = []
-                    continue
-                seen_inodes.add(inode)
-            except OSError:
-                pass
+            real_dir = os.path.realpath(root_dir)
+            if real_dir in seen_realpaths:
+                dirnames[:] = []
+                continue
+            seen_realpaths.add(real_dir)
             dirnames[:] = [d for d in dirnames if d not in skip_dirs]
             for fname in filenames:
+                fpath = Path(root_dir) / fname
                 if fname == "config.json":
-                    configs.append(Path(root_dir) / fname)
+                    configs.append(fpath)
                 elif fname.endswith(".parquet"):
-                    parquets.append(Path(root_dir) / fname)
+                    parquets.append(fpath)
+                    ext_tables.append(fpath)
+                elif fname.endswith((".csv", ".jsonl", ".ndjson")) and Path(root_dir) != data_dir:
+                    ext_tables.append(fpath)
         configs.sort(key=lambda p: len(p.parts))
         parquets.sort(key=lambda p: len(p.parts))
+        ext_tables.sort(key=lambda p: len(p.parts))
 
     for p in configs:
         p_str = str(p).lower()
@@ -1556,9 +1569,16 @@ def discover_paths():
 
             is_deberta = "deberta" in mtype or "deberta" in p_str or "deberta" in arch
             if is_deberta:
-                # Prioritize clean base/large over 3rd-party task-specific checkpoints (ontonotes, ner, khalidalt, etc.)
-                is_task_specific = any(x in p_str for x in ("ontonotes", "ner", "squad", "mnli", "conll", "khalidalt"))
-                tier = 0 if ("deberta-v3-large" in p_str and not is_task_specific) else (1 if not is_task_specific else 2)
+                # Prioritize clean base/large over fine-tuned task variants (-offensive, ontonotes, ner, squad, mnli, etc.)
+                parent_name = p.parent.name.lower()
+                task_tokens = (
+                    "ontonotes", "ner", "squad", "mnli", "conll", "khalidalt",
+                    "offensive", "toxic", "hate", "sentiment", "emotion",
+                    "nli", "xnli", "absa", "rerank", "sarcasm", "irony", "stance",
+                )
+                is_task_specific = any(x in p_str for x in task_tokens)
+                is_exact_clean_large = parent_name in ("deberta-v3-large", "microsoft-deberta-v3-large", "khalidalt-deberta-v3-large")
+                tier = 0 if (is_exact_clean_large and not is_task_specific) else (1 if ("deberta-v3-large" in p_str and not is_task_specific) else (2 if not is_task_specific else 3))
                 size_score = 0 if "large" in p_str else 1
                 deberta_candidates.append(((tier, size_score, len(p.parts)), p.parent))
 
@@ -1577,14 +1597,20 @@ def discover_paths():
         deberta_candidates.sort(key=lambda x: x[0])
         deberta_dir = deberta_candidates[0][1]
 
-    def _inspect_external_parquet(p_cand: Path) -> int:
+    def _inspect_external_table(p_cand: Path) -> int:
         """Returns format tier: 2=wide schema (>=2 label cols), 1=long schema ('model'+'text'), 0=incompatible."""
         try:
-            try:
-                import pyarrow.parquet as pq
-                cols = set(pq.read_schema(p_cand).names)
-            except Exception:
-                cols = set(pd.read_parquet(p_cand).columns)
+            suf = p_cand.suffix.lower()
+            if suf == ".csv":
+                cols = set(pd.read_csv(p_cand, nrows=2).columns)
+            elif suf in (".jsonl", ".ndjson"):
+                cols = set(pd.read_json(p_cand, lines=True, nrows=2).columns)
+            else:
+                try:
+                    import pyarrow.parquet as pq
+                    cols = set(pq.read_schema(p_cand).names)
+                except Exception:
+                    cols = set(pd.read_parquet(p_cand).columns)
             if sum(1 for lbl in LABELS if lbl in cols) >= 2:
                 return 2
             if "model" in cols and "text" in cols:
@@ -1595,43 +1621,54 @@ def discover_paths():
 
     ext_path = None
     env_ext = os.environ.get("NTL_EXT_PATH")
-    if env_ext and Path(env_ext).is_file() and _inspect_external_parquet(Path(env_ext)) > 0:
+    if env_ext and Path(env_ext).is_file() and _inspect_external_table(Path(env_ext)) > 0:
         ext_path = Path(env_ext)
 
     if ext_path is None:
-        # Prioritize exact external_short_wide.parquet inside attached Kaggle datasets first, then repo defaults
-        exact_matches = [p for p in parquets if p.name == "external_short_wide.parquet" and p.is_file()]
+        # 1. Prioritize exact external_short_wide.* inside input_root first
+        exact_matches = [p for p in ext_tables if p.name in ("external_short_wide.parquet", "external_short_wide.csv") and p.is_file()]
         for cand in exact_matches + [
             input_root / "datasets/external_short_wide.parquet",
             input_root / "external_short_wide.parquet",
-            Path("datasets/external_short_wide.parquet"),
-            Path("data/external_short_wide.parquet"),
             Path("/kaggle/working/external_short_wide.parquet"),
         ]:
-            if cand.is_file() and _inspect_external_parquet(cand) > 0:
+            if cand.is_file() and _inspect_external_table(cand) > 0:
                 ext_path = cand
                 break
 
     if ext_path is None:
+        # 2. Score all schema-compatible tables discovered inside input_root BEFORE repo CWD fallbacks
         ext_candidates = []
-        extra_parquets = list(parquets)
-        if not Path("/kaggle/input").exists():
-            for d_fallback in (Path("datasets"), Path("data/processed")):
-                if d_fallback.is_dir():
-                    extra_parquets.extend(sorted(d_fallback.glob("*.parquet")))
-        for p in extra_parquets:
+        for p in ext_tables:
             p_path_str = str(p).lower()
             if any(bad in p_path_str for bad in ("submission", "working", "test_holdout", "sample")):
                 continue
-            tier = _inspect_external_parquet(p)
+            tier = _inspect_external_table(p)
             if tier == 0:
                 continue
-            name_bonus = 2 if any(k in p_path_str for k in ("external", "wide", "short", "corpus", "response", "pool")) else 0
-            # Prefer higher schema tier (wide > long), naming match, then shallower path
-            ext_candidates.append((-(tier * 10 + name_bonus), len(p.parts), p))
+            short_bonus = 4 if "short" in p_path_str else 0
+            name_bonus = 2 if any(k in p_path_str for k in ("external", "wide", "corpus", "response", "pool")) else 0
+            ext_bonus = 3 if p.suffix.lower() == ".parquet" else 0
+            ext_candidates.append((-(tier * 20 + short_bonus + name_bonus + ext_bonus), len(p.parts), p))
         if ext_candidates:
             ext_candidates.sort(key=lambda x: (x[0], x[1]))
             ext_path = ext_candidates[0][2]
+
+    if ext_path is None and not local_data_dir and not Path("/kaggle/input").exists():
+        # 3. Local repo defaults when running without NTL_DATA_DIR override outside Kaggle
+        fallback_tables = [
+            Path("datasets/external_short_wide.parquet"),
+            Path("data/external_short_wide.parquet"),
+        ]
+        for d_fallback in (Path("datasets"), Path("data/processed")):
+            if d_fallback.is_dir():
+                fallback_tables.extend(sorted(d_fallback.glob("*.parquet")))
+                fallback_tables.extend(sorted(d_fallback.glob("*.csv")))
+        for cand in fallback_tables:
+            if cand.is_file() and not any(bad in str(cand).lower() for bad in ("submission", "working", "test_holdout", "sample")):
+                if _inspect_external_table(cand) > 0:
+                    ext_path = cand
+                    break
 
     deb_variant = "large" if deberta_dir and "large" in str(deberta_dir).lower() else "base/unknown"
     qwen_variant = "qwen-3-8b" if qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()) else ("qwen-2.5-7b" if qwen_dir and "2.5" in str(qwen_dir).lower() else "custom/unknown")
@@ -1640,6 +1677,11 @@ def discover_paths():
     print(f"  [Paths] deberta={deberta_dir}  ({deb_variant})")
     print(f"  [Paths] bge={bge_dir}")
     print(f"  [Paths] external={ext_path}")
+    if ext_path is None and input_root.exists():
+        sample_tables = [str(p) for p in ext_tables[:8]]
+        top_mounts = [p.name for p in sorted(input_root.iterdir())] if input_root.is_dir() else []
+        print(f"  [Paths] Note: No external corpus matched under {input_root} (mounts={top_mounts}, tabular_files={sample_tables}).")
+        print("  [Paths] Hint: An attached notebook like 'Name That LLM Wide Data Overview' only provides external data if its output exports a .parquet/.csv file; otherwise attach Dataset 'olegzholobov/name-that-llm-response-corpus' ('external_short_wide.parquet').")
     if deberta_dir is not None:
         deberta_dir = prepare_model_dir(deberta_dir, "deberta")
     if bge_dir is not None:

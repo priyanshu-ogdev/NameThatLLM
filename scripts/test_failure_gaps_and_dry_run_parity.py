@@ -256,13 +256,30 @@ def test_6_external_discovery_and_schema_resilience():
         wide_row = {lbl: f"wide text {lbl}" for lbl in LABELS}
         pd.DataFrame([wide_row, wide_row]).to_parquet(wide_path, index=False)
 
+        # Wide external CSV fallback check
+        wide_csv_path = ext_dir / "external_wide_fallback.csv"
+        pd.DataFrame([wide_row, wide_row]).to_csv(wide_csv_path, index=False)
+
+        # Simulate huggingfacedebertav3variants with both deberta-v3-large and deberta-v3-large-offensive
+        deb_off = tmp_path / "datasets" / "huggingfacedebertav3variants" / "deberta-v3-large-offensive"
+        deb_clean = tmp_path / "datasets" / "huggingfacedebertav3variants" / "deberta-v3-large"
+        deb_off.mkdir(parents=True)
+        deb_clean.mkdir(parents=True)
+        (deb_off / "config.json").write_text('{"model_type": "deberta-v2"}', encoding="utf-8")
+        (deb_clean / "config.json").write_text('{"model_type": "deberta-v2"}', encoding="utf-8")
+
         old_env = {k: os.environ.get(k) for k in ("NTL_DATA_DIR", "NTL_WORKING", "NTL_EXT_PATH")}
         try:
             os.environ["NTL_DATA_DIR"] = str(tmp_path)
             os.environ["NTL_WORKING"] = str(work_dir)
             os.environ.pop("NTL_EXT_PATH", None)
-            _, _, _, _, found_ext, _ = kte.discover_paths()
+            _, _, found_deb, _, found_ext, _ = kte.discover_paths()
+            assert found_deb is not None and Path(found_deb) == deb_clean, f"Expected clean {deb_clean}, got {found_deb}"
             assert found_ext is not None and Path(found_ext) == wide_path, f"Expected {wide_path}, got {found_ext}"
+
+            comb_csv, w_csv = kte.build_mass_balanced_external_corpus(comp_df, wide_csv_path, LABELS)
+            assert len(comb_csv) == len(comp_df) + 2 * NUM_CLASSES
+            assert np.isclose(w_csv.sum(), float(len(comp_df)), atol=1e-4)
 
             comb_w, w_w = kte.build_mass_balanced_external_corpus(comp_df, found_ext, LABELS)
             assert len(comb_w) == len(comp_df) + 2 * NUM_CLASSES

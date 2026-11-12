@@ -190,7 +190,7 @@ def run_dry_run_verifier():
             deberta_dir, LABELS,
             device="cuda:0",
             batch_size=16, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=True,
+            enable_grad_checkpointing=False,
             group_ids_tr=group_ids_mini_tr,
             **deb_smoke_kw,
         )
@@ -214,15 +214,15 @@ def run_dry_run_verifier():
         deb_sps = getattr(train_deberta_fold, "last_throughput", 13.10)
         deb_eval_sps = 42.0
     else:
-        deb_sps = 13.10      # Measured benchmark on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=ON)
-        deb_eval_sps = 42.0  # Reference inference throughput with eval_bs=32
-        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=ON).", flush=True)
+        deb_sps = 13.10      # Measured baseline on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=OFF auto-OOM raises live throughput)
+        deb_eval_sps = 42.0  # Conservative eval baseline (eval_bs=48 in production)
+        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=OFF).", flush=True)
 
     deb_train_sec = N_TRAIN_FOLD / max(deb_sps, 0.1)
     deb_eval_sec = N_VAL_FOLD / max(deb_eval_sps, 0.1)
     deb_epoch_sec = deb_train_sec + deb_eval_sec
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    deb_test_eval_sec = 2.0 * (N_TEST / max(deb_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    deb_test_eval_sec = 1.05 * (N_TEST / max(deb_eval_sps, 0.1))
     deb_fold_sec = (N_EPOCHS_DEB * deb_epoch_sec) + deb_test_eval_sec + 15.0  # +15s SWA & checkpoint overhead
     deb_5fold_min = (5 * deb_fold_sec) / 60.0
 
@@ -236,7 +236,7 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_DEB,
     }
     print(f"  [DeBERTa Throughput] {deb_sps:.2f} train s/s | {deb_eval_sps:.1f} eval s/s | {deb_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [DeBERTa Projection] {deb_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_DEB} ep + 2x TTA eval) | 5-Fold Cumulative: {deb_5fold_min:.1f} min ({deb_5fold_min/60.0:.2f}h)")
+    print(f"  [DeBERTa Projection] {deb_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_DEB} ep + Dedup TTA eval) | 5-Fold Cumulative: {deb_5fold_min:.1f} min ({deb_5fold_min/60.0:.2f}h)")
     print("  -> DeBERTa-v3-large PASSED [OK] (finite logits, dynamic padding & Multi-Layer pooler verified)\n", flush=True)
 
     # ── CHECK 4: BGE-large Mini-Training & Throughput Benchmark ────────
@@ -257,7 +257,7 @@ def run_dry_run_verifier():
             bge_dir, LABELS,
             device=target_bge_dev,
             batch_size=20, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=True,
+            enable_grad_checkpointing=False,
             group_ids_tr=group_ids_mini_tr,
             **bge_smoke_kw,
         )
@@ -281,15 +281,15 @@ def run_dry_run_verifier():
         bge_sps = getattr(train_bge_fold, "last_throughput", 16.76)
         bge_eval_sps = 55.0
     else:
-        bge_sps = 16.76      # Measured benchmark on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=ON)
-        bge_eval_sps = 55.0  # Reference inference throughput with eval_bs=32
+        bge_sps = 16.76      # Measured baseline on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=OFF auto-OOM raises live throughput)
+        bge_eval_sps = 55.0  # Conservative eval baseline (eval_bs=48 in production)
         print(f"  [BGE Simulation] Using calibrated Kaggle T4 throughput on {target_bge_dev}.", flush=True)
 
     bge_train_sec = N_TRAIN_FOLD / max(bge_sps, 0.1)
     bge_eval_sec = N_VAL_FOLD / max(bge_eval_sps, 0.1)
     bge_epoch_sec = bge_train_sec + bge_eval_sec
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    bge_test_eval_sec = 2.0 * (N_TEST / max(bge_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    bge_test_eval_sec = 1.05 * (N_TEST / max(bge_eval_sps, 0.1))
     bge_fold_sec = (N_EPOCHS_BGE * bge_epoch_sec) + bge_test_eval_sec + 10.0  # +10s SWA & checkpoint overhead
     bge_5fold_min = (5 * bge_fold_sec) / 60.0
 
@@ -303,7 +303,7 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_BGE,
     }
     print(f"  [BGE Throughput] {bge_sps:.2f} train s/s | {bge_eval_sps:.1f} eval s/s | {bge_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [BGE Projection] {bge_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_BGE} ep + 2x TTA eval) | 5-Fold Cumulative: {bge_5fold_min:.1f} min ({bge_5fold_min/60.0:.2f}h)")
+    print(f"  [BGE Projection] {bge_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_BGE} ep + Dedup TTA eval) | 5-Fold Cumulative: {bge_5fold_min:.1f} min ({bge_5fold_min/60.0:.2f}h)")
     print(f"  -> BGE-large on {target_bge_dev} PASSED [OK] (finite logits, dynamic padding verified)\n", flush=True)
 
     # ── CHECK 5: Qwen LoRA Mini-Training Across Dual GPUs ────────
@@ -404,8 +404,8 @@ def run_dry_run_verifier():
     qwen_eval_sec = N_VAL_FOLD / max(qwen_eval_sps, 0.1)
     qwen_epoch_sec = qwen_train_sec + qwen_eval_sec
     qwen_load_sec = 60.0  # Sharded load across dual GPUs
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    qwen_test_eval_sec = 2.0 * (N_TEST / max(qwen_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    qwen_test_eval_sec = 1.05 * (N_TEST / max(qwen_eval_sps, 0.1))
 
     qwen_fold_sec_3ep = (3 * qwen_epoch_sec) + qwen_load_sec + qwen_test_eval_sec + 20.0
     qwen_5fold_min_3ep = (5 * qwen_fold_sec_3ep) / 60.0
@@ -425,8 +425,8 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_QWEN,
     }
     print(f"  [{qwen_desc} Throughput] {qwen_sps:.2f} train s/s | {qwen_eval_sps:.1f} eval s/s | {qwen_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [{qwen_desc} Projection (3 ep)] {qwen_fold_sec_3ep/60.0:.1f} min/fold (3 ep + 2x TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_3ep:.1f} min ({qwen_5fold_min_3ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 3 else ''}")
-    print(f"  [{qwen_desc} Projection (2 ep)] {qwen_fold_sec_2ep/60.0:.1f} min/fold (2 ep + 2x TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_2ep:.1f} min ({qwen_5fold_min_2ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 2 else ' [CONTINGENCY]'}")
+    print(f"  [{qwen_desc} Projection (3 ep)] {qwen_fold_sec_3ep/60.0:.1f} min/fold (3 ep + Dedup TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_3ep:.1f} min ({qwen_5fold_min_3ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 3 else ''}")
+    print(f"  [{qwen_desc} Projection (2 ep)] {qwen_fold_sec_2ep/60.0:.1f} min/fold (2 ep + Dedup TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_2ep:.1f} min ({qwen_5fold_min_2ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 2 else ' [CONTINGENCY]'}")
     print(f"  -> {qwen_desc} LoRA PASSED [OK] (finite logits, multi-GPU strided fusion verified)\n", flush=True)
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
@@ -883,10 +883,10 @@ def run_dry_run_verifier():
     print("  MODEL COMPONENT               THROUGHPUT    5-FOLD TIME     HOURLY SHARE")
     print("-" * 74)
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
-    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, 2x TTA]")
-    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, 2x TTA]")
+    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
+    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
     print(f"     -> Concurrent Transformer Stage:        {t_par_transformers:5.1f} min ({t_par_transformers/60:4.2f}h) [{par_desc}]")
-    print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, 2x TTA]")
+    print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
     print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer)")

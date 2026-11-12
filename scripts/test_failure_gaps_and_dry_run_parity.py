@@ -307,6 +307,43 @@ def test_6_external_discovery_and_schema_resilience():
     print("[PASS] Test 6: Nested external discovery, junk rejection & wide/long schema resilience")
 
 
+def test_7_deduplicated_tta_bit_parity():
+    """Verify _blend_dedup_tta matches full 2x TTA bit-for-bit while skipping identical sequences."""
+    enc_base = {
+        "input_ids": [[10, i, 20] for i in range(10)],
+        "attention_mask": [[1, 1, 1] for _ in range(10)],
+        "token_type_ids": [[0, 0, 0] for _ in range(10)],
+    }
+    enc_tta_mixed = {
+        "input_ids": [[10, i, 20] if i not in (2, 7) else [10, i + 100, 99] for i in range(10)],
+        "attention_mask": [[1, 1, 1] for _ in range(10)],
+        "token_type_ids": [[0, 0, 0] for _ in range(10)],
+    }
+
+    calls = []
+
+    def _det_eval(enc):
+        calls.append(len(enc["input_ids"]))
+        out = np.zeros((len(enc["input_ids"]), 4), dtype=np.float64)
+        for row_idx, ids in enumerate(enc["input_ids"]):
+            out[row_idx] = [float(ids[1]), float(ids[2]), float(ids[1] * 0.5), -float(ids[2])]
+        return out
+
+    naive = 0.5 * _det_eval(enc_base) + 0.5 * _det_eval(enc_tta_mixed)
+    calls.clear()
+    dedup = kte._blend_dedup_tta(_det_eval, enc_base, enc_tta_mixed)
+    assert calls == [10, 2], f"Expected [10, 2] evaluated sequences, got {calls}"
+    assert np.allclose(dedup, naive, atol=1e-12), f"Bit parity mismatch: max_diff={np.max(np.abs(dedup - naive))}"
+
+    # All-identical case (e.g. N_TEST with <= 448 tokens) must trigger zero redundant passes
+    calls.clear()
+    enc_tta_same = {k: [list(x) for x in v] for k, v in enc_base.items()}
+    same_res = kte._blend_dedup_tta(_det_eval, enc_base, enc_tta_same)
+    assert calls == [10], f"Expected single pass [10] when all sequences match, got {calls}"
+    assert np.allclose(same_res, _det_eval(enc_base), atol=1e-12)
+    print("[PASS] Test 7: Deduplicated TTA bit-for-bit parity & redundant-pass skip verified")
+
+
 if __name__ == "__main__":
     test_1_prompt_groups_nan_and_empty_ids()
     test_2_single_class_clique_and_tiny_subspace()
@@ -314,4 +351,5 @@ if __name__ == "__main__":
     test_4_dry_run_cache_slicing_and_tiny_hf_fold_lifecycle()
     test_5_run_quad_ensemble_partial_and_na_ids()
     test_6_external_discovery_and_schema_resilience()
-    print("\nALL 6 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")
+    test_7_deduplicated_tta_bit_parity()
+    print("\nALL 7 ADVERSARIAL FAILURE-GAP & PARITY TESTS PASSED!")

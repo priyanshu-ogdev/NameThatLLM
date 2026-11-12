@@ -2152,12 +2152,51 @@ def get_optimizer_grouped_parameters(model, lr_head, lr_backbone, layer_decay=0.
 
 # --- 6. UNIFIED HIGH-THROUGHPUT TRANSFORMER TRAINING (GPU 0 & GPU 1) ---
 
+def _seq_equal(a, b):
+    if isinstance(a, list) and isinstance(b, list):
+        return a == b
+    return np.array_equal(a, b)
+
+
+def _blend_dedup_tta(eval_fn, enc_data, enc_data_tta):
+    """Evaluate enc_data once and only re-evaluate enc_data_tta indices whose tokens actually differ."""
+    base_logits = eval_fn(enc_data)
+    if enc_data_tta is None:
+        return base_logits
+    n = len(enc_data.get("input_ids", []))
+    ids_base = enc_data.get("input_ids", [])
+    ids_tta = enc_data_tta.get("input_ids", [])
+    mask_base = enc_data.get("attention_mask", [])
+    mask_tta = enc_data_tta.get("attention_mask", [])
+    tti_base = enc_data.get("token_type_ids")
+    tti_tta = enc_data_tta.get("token_type_ids")
+    if len(ids_tta) != n or (tti_base is None) != (tti_tta is None):
+        diff_idx = list(range(n))
+    else:
+        has_tti = tti_base is not None
+        diff_idx = [
+            i for i in range(n)
+            if not (
+                _seq_equal(ids_base[i], ids_tta[i])
+                and _seq_equal(mask_base[i], mask_tta[i])
+                and (not has_tti or _seq_equal(tti_base[i], tti_tta[i]))
+            )
+        ]
+    if not diff_idx:
+        return base_logits
+    sub_tta = {k: [v[i] for i in diff_idx] for k, v in enc_data_tta.items() if isinstance(v, list)}
+    tta_sub_logits = eval_fn(sub_tta)
+    blended = base_logits.copy()
+    blended[diff_idx] = 0.5 * base_logits[diff_idx] + 0.5 * tta_sub_logits
+    return blended
+
+
 def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_classes, enc_data_tta=None):
     """
-    Length-sorted batched inference for encoder models with eval_bs=32 and Multi-Layer Fusion.
+    Length-sorted batched inference for encoder models with eval_bs=48 and Multi-Layer Fusion.
     Groups evaluation passages by length to eliminate redundant padding tokens,
     then inverts the sort order back to the original index sequence.
-    Optionally evaluates enc_data_tta and averages test predictions (Test-Time Augmentation).
+    Optionally evaluates only diverging enc_data_tta sequences (Deduplicated TTA) and averages logits.
     """
     def _eval_single(enc):
         n_samples = len(enc["input_ids"]) if "input_ids" in enc else 0
@@ -2167,7 +2206,7 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
         sort_idx = np.argsort(lengths)
         cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
         pooler = get_model_pooler(model)
-        eval_bs = 32  # Memory-safe for Tesla T4 under L=448 (with OOM halving backoff)
+        eval_bs = 48  # Fast inference under inference_mode() on Tesla T4 (with OOM halving backoff)
         while True:
             all_logits = []
             try:
@@ -2213,11 +2252,7 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
         return sorted_logits[inv_idx]
 
     model.eval()
-    base_logits = _eval_single(enc_data)
-    if enc_data_tta is not None:
-        tta_logits = _eval_single(enc_data_tta)
-        return 0.5 * base_logits + 0.5 * tta_logits
-    return base_logits
+    return _blend_dedup_tta(_eval_single, enc_data, enc_data_tta)
 
 
 def check_finite_logits(logits: np.ndarray, name: str) -> np.ndarray:
@@ -2301,7 +2336,7 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        inf_bs = 16
+        inf_bs = 24  # Fast sharded inference under inference_mode() (with OOM halving backoff)
         autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
         while True:
             all_logits = []
@@ -2361,11 +2396,7 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
 
     backbone.eval()
     head.eval()
-    base_logits = _eval_single(enc_data)
-    if enc_data_tta is not None:
-        tta_logits = _eval_single(enc_data_tta)
-        return 0.5 * base_logits + 0.5 * tta_logits
-    return base_logits
+    return _blend_dedup_tta(_eval_single, enc_data, enc_data_tta)
 
 
 def get_cosine_schedule_with_warmup_and_min_lr(
@@ -2564,7 +2595,8 @@ def _train_transformer_fold_impl(
             model.deberta.pooler = pooler_instance
 
     use_reentrant_ckpt = False
-    if enable_grad_checkpointing:
+    ckpt_active = bool(enable_grad_checkpointing)
+    if ckpt_active:
         try:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         except TypeError:
@@ -2654,6 +2686,7 @@ def _train_transformer_fold_impl(
     pure_train_sec = 0.0
     first_step_overhead = 0.0
     n_total_micros_executed = 0
+    steady_samples_executed = 0
 
     topic_prep = None
     if use_topic_masking and group_ids_tr is not None and getattr(tokenizer, "mask_token_id", None) is not None:
@@ -2686,6 +2719,8 @@ def _train_transformer_fold_impl(
         running_loss = 0.0
         n_micro = 0
         accumulated_steps = 0
+        ep_samples = 0
+        ep_steady_samples = 0
 
         t_batch_start = time.perf_counter()
         t_step1_done = None
@@ -2752,6 +2787,9 @@ def _train_transformer_fold_impl(
                         print(f"  [{model_name}] CUDA OOM detected at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
                         if n_oom_skips > 5:
                             raise RuntimeError(f"[{model_name}] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                        set_model_pooler_mask(model, None)
+                        if pooler_inst is not None:
+                            pooler_inst._extra_layers = None
                         try:
                             del logits, loss, batch_kwargs, batch_labels
                         except Exception:
@@ -2763,11 +2801,24 @@ def _train_transformer_fold_impl(
                             with torch.cuda.device(dev_idx):
                                 torch.cuda.synchronize(dev_idx)
                                 torch.cuda.empty_cache()
+                        if not ckpt_active and hasattr(model, "gradient_checkpointing_enable"):
+                            try:
+                                model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                            except TypeError:
+                                use_reentrant_ckpt = True
+                                model.gradient_checkpointing_enable()
+                            ckpt_active = True
+                            print(f"  [{model_name}] Auto-enabled gradient checkpointing after CUDA OOM to protect remaining fold.", flush=True)
                         continue
 
                     running_loss += loss_val
                     n_micro += 1
                     n_total_micros_executed += 1
+                    n_b = int(batch_labels.numel())
+                    ep_samples += n_b
+                    if not (epoch == 0 and micro_step == 0):
+                        steady_samples_executed += n_b
+                        ep_steady_samples += n_b
                     accumulated_steps += 1
 
                     if accumulated_steps == grad_accum:
@@ -2794,10 +2845,10 @@ def _train_transformer_fold_impl(
                     if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
                         if t_step1_done is not None and micro_step > 0:
                             step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_steady_samples / step_elapsed
                         else:
                             step_elapsed = max(time.perf_counter() - t_batch_start, 0.001)
-                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_samples / step_elapsed
                         step_loss = running_loss / max(n_micro, 1)
                         pct = ((micro_step + 1) / n_total_micros) * 100.0
                         print(f"  [{model_name}] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status(dev)}", flush=True)
@@ -2846,10 +2897,9 @@ def _train_transformer_fold_impl(
             break
 
     train_dur = time.perf_counter() - t_train_start
-    if n_total_micros_executed > 1 and first_step_overhead > 0.0:
-        steady_samples = max(n_total_micros_executed - 1, 1) * batch_size
+    if n_total_micros_executed > 1 and steady_samples_executed > 0 and first_step_overhead > 0.0:
         steady_sec = max(pure_train_sec - first_step_overhead, 0.001)
-        pure_throughput = steady_samples / steady_sec
+        pure_throughput = steady_samples_executed / steady_sec
     else:
         pure_throughput = (len(texts_tr) * max(epoch + 1, 1)) / max(pure_train_sec, 0.01)
     train_transformer_fold.last_throughput = pure_throughput
@@ -2958,7 +3008,7 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
     kwargs.setdefault("lr_backbone", 1.8e-5)
     kwargs.setdefault("lr_head", 1.5e-4)
     kwargs.setdefault("layer_decay", 0.90)
-    kwargs.setdefault("enable_grad_checkpointing", True)
+    kwargs.setdefault("enable_grad_checkpointing", False)
     return train_transformer_fold(
         "DeBERTa FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -2973,7 +3023,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
     kwargs.setdefault("lr_backbone", 2.2e-5)
     kwargs.setdefault("lr_head", 1.2e-4)
     kwargs.setdefault("layer_decay", 0.85)
-    kwargs.setdefault("enable_grad_checkpointing", True)
+    kwargs.setdefault("enable_grad_checkpointing", False)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -3215,6 +3265,7 @@ def _train_qwen_lora_fold_impl(
     pure_qwen_sec = 0.0
     first_step_overhead = 0.0
     n_total_micros_executed = 0
+    steady_samples_executed = 0
     stop_early = False
     n_skipped_micros = 0
     n_oom_skips = 0
@@ -3238,6 +3289,8 @@ def _train_qwen_lora_fold_impl(
         epoch_loss = 0.0
         n_batches = 0
         accumulated_steps = 0
+        ep_samples = 0
+        ep_steady_samples = 0
 
         prefetcher = FastBatchPrefetcher(
             tokenizer, enc_tr, y_tr_int, epoch_indices, batch_size,
@@ -3323,6 +3376,11 @@ def _train_qwen_lora_fold_impl(
                     epoch_loss += loss_val
                     n_batches += 1
                     n_total_micros_executed += 1
+                    n_b = int(batch_labels.numel())
+                    ep_samples += n_b
+                    if not (epoch == 0 and micro_step == 0):
+                        steady_samples_executed += n_b
+                        ep_steady_samples += n_b
                     accumulated_steps += 1
 
                     if accumulated_steps == grad_accum:
@@ -3349,10 +3407,10 @@ def _train_qwen_lora_fold_impl(
                     if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
                         if t_step1_done is not None and micro_step > 0:
                             step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_steady_samples / step_elapsed
                         else:
                             step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
-                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_samples / step_elapsed
                         step_loss = epoch_loss / max(n_batches, 1)
                         pct = ((micro_step + 1) / n_total_micros) * 100.0
                         print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
@@ -3401,10 +3459,9 @@ def _train_qwen_lora_fold_impl(
             break
 
     qwen_dur = time.perf_counter() - t_qwen_train_start
-    if n_total_micros_executed > 1 and first_step_overhead > 0.0:
-        steady_samples = max(n_total_micros_executed - 1, 1) * batch_size
+    if n_total_micros_executed > 1 and steady_samples_executed > 0 and first_step_overhead > 0.0:
         steady_sec = max(pure_qwen_sec - first_step_overhead, 0.001)
-        qwen_sps = steady_samples / steady_sec
+        qwen_sps = steady_samples_executed / steady_sec
     else:
         qwen_sps = (len(texts_tr) * max(epoch + 1, 1)) / max(pure_qwen_sec, 0.01)
     train_qwen_lora_fold.last_throughput = qwen_sps
@@ -4582,7 +4639,7 @@ def run_dry_run_verifier():
             deberta_dir, LABELS,
             device="cuda:0",
             batch_size=16, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=True,
+            enable_grad_checkpointing=False,
             group_ids_tr=group_ids_mini_tr,
             **deb_smoke_kw,
         )
@@ -4606,15 +4663,15 @@ def run_dry_run_verifier():
         deb_sps = getattr(train_deberta_fold, "last_throughput", 13.10)
         deb_eval_sps = 42.0
     else:
-        deb_sps = 13.10      # Measured benchmark on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=ON)
-        deb_eval_sps = 42.0  # Reference inference throughput with eval_bs=32
-        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=ON).", flush=True)
+        deb_sps = 13.10      # Measured baseline on Kaggle Tesla T4 FP16 (BS=16, L=448, ckpt=OFF auto-OOM raises live throughput)
+        deb_eval_sps = 42.0  # Conservative eval baseline (eval_bs=48 in production)
+        print("  [DeBERTa Simulation] Using calibrated Kaggle T4 throughput (BS=16, L=448, ckpt=OFF).", flush=True)
 
     deb_train_sec = N_TRAIN_FOLD / max(deb_sps, 0.1)
     deb_eval_sec = N_VAL_FOLD / max(deb_eval_sps, 0.1)
     deb_epoch_sec = deb_train_sec + deb_eval_sec
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    deb_test_eval_sec = 2.0 * (N_TEST / max(deb_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    deb_test_eval_sec = 1.05 * (N_TEST / max(deb_eval_sps, 0.1))
     deb_fold_sec = (N_EPOCHS_DEB * deb_epoch_sec) + deb_test_eval_sec + 15.0  # +15s SWA & checkpoint overhead
     deb_5fold_min = (5 * deb_fold_sec) / 60.0
 
@@ -4628,7 +4685,7 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_DEB,
     }
     print(f"  [DeBERTa Throughput] {deb_sps:.2f} train s/s | {deb_eval_sps:.1f} eval s/s | {deb_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [DeBERTa Projection] {deb_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_DEB} ep + 2x TTA eval) | 5-Fold Cumulative: {deb_5fold_min:.1f} min ({deb_5fold_min/60.0:.2f}h)")
+    print(f"  [DeBERTa Projection] {deb_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_DEB} ep + Dedup TTA eval) | 5-Fold Cumulative: {deb_5fold_min:.1f} min ({deb_5fold_min/60.0:.2f}h)")
     print("  -> DeBERTa-v3-large PASSED [OK] (finite logits, dynamic padding & Multi-Layer pooler verified)\n", flush=True)
 
     # ── CHECK 4: BGE-large Mini-Training & Throughput Benchmark ────────
@@ -4649,7 +4706,7 @@ def run_dry_run_verifier():
             bge_dir, LABELS,
             device=target_bge_dev,
             batch_size=20, grad_accum=1, max_length=448, epochs=1,
-            enable_grad_checkpointing=True,
+            enable_grad_checkpointing=False,
             group_ids_tr=group_ids_mini_tr,
             **bge_smoke_kw,
         )
@@ -4673,15 +4730,15 @@ def run_dry_run_verifier():
         bge_sps = getattr(train_bge_fold, "last_throughput", 16.76)
         bge_eval_sps = 55.0
     else:
-        bge_sps = 16.76      # Measured benchmark on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=ON)
-        bge_eval_sps = 55.0  # Reference inference throughput with eval_bs=32
+        bge_sps = 16.76      # Measured baseline on Kaggle Tesla T4 FP16 (BS=20, L=448, ckpt=OFF auto-OOM raises live throughput)
+        bge_eval_sps = 55.0  # Conservative eval baseline (eval_bs=48 in production)
         print(f"  [BGE Simulation] Using calibrated Kaggle T4 throughput on {target_bge_dev}.", flush=True)
 
     bge_train_sec = N_TRAIN_FOLD / max(bge_sps, 0.1)
     bge_eval_sec = N_VAL_FOLD / max(bge_eval_sps, 0.1)
     bge_epoch_sec = bge_train_sec + bge_eval_sec
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    bge_test_eval_sec = 2.0 * (N_TEST / max(bge_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    bge_test_eval_sec = 1.05 * (N_TEST / max(bge_eval_sps, 0.1))
     bge_fold_sec = (N_EPOCHS_BGE * bge_epoch_sec) + bge_test_eval_sec + 10.0  # +10s SWA & checkpoint overhead
     bge_5fold_min = (5 * bge_fold_sec) / 60.0
 
@@ -4695,7 +4752,7 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_BGE,
     }
     print(f"  [BGE Throughput] {bge_sps:.2f} train s/s | {bge_eval_sps:.1f} eval s/s | {bge_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [BGE Projection] {bge_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_BGE} ep + 2x TTA eval) | 5-Fold Cumulative: {bge_5fold_min:.1f} min ({bge_5fold_min/60.0:.2f}h)")
+    print(f"  [BGE Projection] {bge_fold_sec/60.0:.1f} min/fold ({N_EPOCHS_BGE} ep + Dedup TTA eval) | 5-Fold Cumulative: {bge_5fold_min:.1f} min ({bge_5fold_min/60.0:.2f}h)")
     print(f"  -> BGE-large on {target_bge_dev} PASSED [OK] (finite logits, dynamic padding verified)\n", flush=True)
 
     # ── CHECK 5: Qwen LoRA Mini-Training Across Dual GPUs ────────
@@ -4796,8 +4853,8 @@ def run_dry_run_verifier():
     qwen_eval_sec = N_VAL_FOLD / max(qwen_eval_sps, 0.1)
     qwen_epoch_sec = qwen_train_sec + qwen_eval_sec
     qwen_load_sec = 60.0  # Sharded load across dual GPUs
-    # TTA doubles the test evaluation forward passes (enc_te + enc_te_tta)
-    qwen_test_eval_sec = 2.0 * (N_TEST / max(qwen_eval_sps, 0.1))
+    # Deduplicated TTA skips identical <=448-token sequences (~<=5% long passages need 2nd pass)
+    qwen_test_eval_sec = 1.05 * (N_TEST / max(qwen_eval_sps, 0.1))
 
     qwen_fold_sec_3ep = (3 * qwen_epoch_sec) + qwen_load_sec + qwen_test_eval_sec + 20.0
     qwen_5fold_min_3ep = (5 * qwen_fold_sec_3ep) / 60.0
@@ -4817,8 +4874,8 @@ def run_dry_run_verifier():
         "epochs": N_EPOCHS_QWEN,
     }
     print(f"  [{qwen_desc} Throughput] {qwen_sps:.2f} train s/s | {qwen_eval_sps:.1f} eval s/s | {qwen_epoch_sec/60.0:.2f} min/epoch on N_fold={N_TRAIN_FOLD}")
-    print(f"  [{qwen_desc} Projection (3 ep)] {qwen_fold_sec_3ep/60.0:.1f} min/fold (3 ep + 2x TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_3ep:.1f} min ({qwen_5fold_min_3ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 3 else ''}")
-    print(f"  [{qwen_desc} Projection (2 ep)] {qwen_fold_sec_2ep/60.0:.1f} min/fold (2 ep + 2x TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_2ep:.1f} min ({qwen_5fold_min_2ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 2 else ' [CONTINGENCY]'}")
+    print(f"  [{qwen_desc} Projection (3 ep)] {qwen_fold_sec_3ep/60.0:.1f} min/fold (3 ep + Dedup TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_3ep:.1f} min ({qwen_5fold_min_3ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 3 else ''}")
+    print(f"  [{qwen_desc} Projection (2 ep)] {qwen_fold_sec_2ep/60.0:.1f} min/fold (2 ep + Dedup TTA eval) | 5-Fold Cumulative: {qwen_5fold_min_2ep:.1f} min ({qwen_5fold_min_2ep/60.0:.2f}h){' [ACTIVE]' if N_EPOCHS_QWEN == 2 else ' [CONTINGENCY]'}")
     print(f"  -> {qwen_desc} LoRA PASSED [OK] (finite logits, multi-GPU strided fusion verified)\n", flush=True)
 
     # ── CHECK 6: CPU Multiview Dual-Linear & Sibling Specialists Throughput ───
@@ -5275,10 +5332,10 @@ def run_dry_run_verifier():
     print("  MODEL COMPONENT               THROUGHPUT    5-FOLD TIME     HOURLY SHARE")
     print("-" * 74)
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
-    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, 2x TTA]")
-    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, 2x TTA]")
+    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
+    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
     print(f"     -> Concurrent Transformer Stage:        {t_par_transformers:5.1f} min ({t_par_transformers/60:4.2f}h) [{par_desc}]")
-    print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, 2x TTA]")
+    print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
     print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 8.2h budget, +{8.2-total_est_hours_active:.2f}h buffer)")

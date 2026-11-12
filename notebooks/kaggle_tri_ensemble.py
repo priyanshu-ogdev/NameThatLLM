@@ -2152,12 +2152,51 @@ def get_optimizer_grouped_parameters(model, lr_head, lr_backbone, layer_decay=0.
 
 # --- 6. UNIFIED HIGH-THROUGHPUT TRANSFORMER TRAINING (GPU 0 & GPU 1) ---
 
+def _seq_equal(a, b):
+    if isinstance(a, list) and isinstance(b, list):
+        return a == b
+    return np.array_equal(a, b)
+
+
+def _blend_dedup_tta(eval_fn, enc_data, enc_data_tta):
+    """Evaluate enc_data once and only re-evaluate enc_data_tta indices whose tokens actually differ."""
+    base_logits = eval_fn(enc_data)
+    if enc_data_tta is None:
+        return base_logits
+    n = len(enc_data.get("input_ids", []))
+    ids_base = enc_data.get("input_ids", [])
+    ids_tta = enc_data_tta.get("input_ids", [])
+    mask_base = enc_data.get("attention_mask", [])
+    mask_tta = enc_data_tta.get("attention_mask", [])
+    tti_base = enc_data.get("token_type_ids")
+    tti_tta = enc_data_tta.get("token_type_ids")
+    if len(ids_tta) != n or (tti_base is None) != (tti_tta is None):
+        diff_idx = list(range(n))
+    else:
+        has_tti = tti_base is not None
+        diff_idx = [
+            i for i in range(n)
+            if not (
+                _seq_equal(ids_base[i], ids_tta[i])
+                and _seq_equal(mask_base[i], mask_tta[i])
+                and (not has_tti or _seq_equal(tti_base[i], tti_tta[i]))
+            )
+        ]
+    if not diff_idx:
+        return base_logits
+    sub_tta = {k: [v[i] for i in diff_idx] for k, v in enc_data_tta.items() if isinstance(v, list)}
+    tta_sub_logits = eval_fn(sub_tta)
+    blended = base_logits.copy()
+    blended[diff_idx] = 0.5 * base_logits[diff_idx] + 0.5 * tta_sub_logits
+    return blended
+
+
 def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_classes, enc_data_tta=None):
     """
-    Length-sorted batched inference for encoder models with eval_bs=32 and Multi-Layer Fusion.
+    Length-sorted batched inference for encoder models with eval_bs=48 and Multi-Layer Fusion.
     Groups evaluation passages by length to eliminate redundant padding tokens,
     then inverts the sort order back to the original index sequence.
-    Optionally evaluates enc_data_tta and averages test predictions (Test-Time Augmentation).
+    Optionally evaluates only diverging enc_data_tta sequences (Deduplicated TTA) and averages logits.
     """
     def _eval_single(enc):
         n_samples = len(enc["input_ids"]) if "input_ids" in enc else 0
@@ -2167,7 +2206,7 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
         sort_idx = np.argsort(lengths)
         cuda_ok = torch.cuda.is_available() and getattr(dev, "type", str(dev)) != "cpu"
         pooler = get_model_pooler(model)
-        eval_bs = 32  # Memory-safe for Tesla T4 under L=448 (with OOM halving backoff)
+        eval_bs = 48  # Fast inference under inference_mode() on Tesla T4 (with OOM halving backoff)
         while True:
             all_logits = []
             try:
@@ -2213,11 +2252,7 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
         return sorted_logits[inv_idx]
 
     model.eval()
-    base_logits = _eval_single(enc_data)
-    if enc_data_tta is not None:
-        tta_logits = _eval_single(enc_data_tta)
-        return 0.5 * base_logits + 0.5 * tta_logits
-    return base_logits
+    return _blend_dedup_tta(_eval_single, enc_data, enc_data_tta)
 
 
 def check_finite_logits(logits: np.ndarray, name: str) -> np.ndarray:
@@ -2301,7 +2336,7 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             return np.zeros((0, num_classes), dtype=np.float64)
         lengths = [len(x) for x in enc["input_ids"]]
         sort_idx = np.argsort(lengths)
-        inf_bs = 16
+        inf_bs = 24  # Fast sharded inference under inference_mode() (with OOM halving backoff)
         autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
         while True:
             all_logits = []
@@ -2361,11 +2396,7 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
 
     backbone.eval()
     head.eval()
-    base_logits = _eval_single(enc_data)
-    if enc_data_tta is not None:
-        tta_logits = _eval_single(enc_data_tta)
-        return 0.5 * base_logits + 0.5 * tta_logits
-    return base_logits
+    return _blend_dedup_tta(_eval_single, enc_data, enc_data_tta)
 
 
 def get_cosine_schedule_with_warmup_and_min_lr(
@@ -2564,7 +2595,8 @@ def _train_transformer_fold_impl(
             model.deberta.pooler = pooler_instance
 
     use_reentrant_ckpt = False
-    if enable_grad_checkpointing:
+    ckpt_active = bool(enable_grad_checkpointing)
+    if ckpt_active:
         try:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         except TypeError:
@@ -2654,6 +2686,7 @@ def _train_transformer_fold_impl(
     pure_train_sec = 0.0
     first_step_overhead = 0.0
     n_total_micros_executed = 0
+    steady_samples_executed = 0
 
     topic_prep = None
     if use_topic_masking and group_ids_tr is not None and getattr(tokenizer, "mask_token_id", None) is not None:
@@ -2686,6 +2719,8 @@ def _train_transformer_fold_impl(
         running_loss = 0.0
         n_micro = 0
         accumulated_steps = 0
+        ep_samples = 0
+        ep_steady_samples = 0
 
         t_batch_start = time.perf_counter()
         t_step1_done = None
@@ -2752,6 +2787,9 @@ def _train_transformer_fold_impl(
                         print(f"  [{model_name}] CUDA OOM detected at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
                         if n_oom_skips > 5:
                             raise RuntimeError(f"[{model_name}] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                        set_model_pooler_mask(model, None)
+                        if pooler_inst is not None:
+                            pooler_inst._extra_layers = None
                         try:
                             del logits, loss, batch_kwargs, batch_labels
                         except Exception:
@@ -2763,11 +2801,24 @@ def _train_transformer_fold_impl(
                             with torch.cuda.device(dev_idx):
                                 torch.cuda.synchronize(dev_idx)
                                 torch.cuda.empty_cache()
+                        if not ckpt_active and hasattr(model, "gradient_checkpointing_enable"):
+                            try:
+                                model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+                            except TypeError:
+                                use_reentrant_ckpt = True
+                                model.gradient_checkpointing_enable()
+                            ckpt_active = True
+                            print(f"  [{model_name}] Auto-enabled gradient checkpointing after CUDA OOM to protect remaining fold.", flush=True)
                         continue
 
                     running_loss += loss_val
                     n_micro += 1
                     n_total_micros_executed += 1
+                    n_b = int(batch_labels.numel())
+                    ep_samples += n_b
+                    if not (epoch == 0 and micro_step == 0):
+                        steady_samples_executed += n_b
+                        ep_steady_samples += n_b
                     accumulated_steps += 1
 
                     if accumulated_steps == grad_accum:
@@ -2794,10 +2845,10 @@ def _train_transformer_fold_impl(
                     if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
                         if t_step1_done is not None and micro_step > 0:
                             step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_steady_samples / step_elapsed
                         else:
                             step_elapsed = max(time.perf_counter() - t_batch_start, 0.001)
-                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_samples / step_elapsed
                         step_loss = running_loss / max(n_micro, 1)
                         pct = ((micro_step + 1) / n_total_micros) * 100.0
                         print(f"  [{model_name}] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status(dev)}", flush=True)
@@ -2846,10 +2897,9 @@ def _train_transformer_fold_impl(
             break
 
     train_dur = time.perf_counter() - t_train_start
-    if n_total_micros_executed > 1 and first_step_overhead > 0.0:
-        steady_samples = max(n_total_micros_executed - 1, 1) * batch_size
+    if n_total_micros_executed > 1 and steady_samples_executed > 0 and first_step_overhead > 0.0:
         steady_sec = max(pure_train_sec - first_step_overhead, 0.001)
-        pure_throughput = steady_samples / steady_sec
+        pure_throughput = steady_samples_executed / steady_sec
     else:
         pure_throughput = (len(texts_tr) * max(epoch + 1, 1)) / max(pure_train_sec, 0.01)
     train_transformer_fold.last_throughput = pure_throughput
@@ -2958,7 +3008,7 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
     kwargs.setdefault("lr_backbone", 1.8e-5)
     kwargs.setdefault("lr_head", 1.5e-4)
     kwargs.setdefault("layer_decay", 0.90)
-    kwargs.setdefault("enable_grad_checkpointing", True)
+    kwargs.setdefault("enable_grad_checkpointing", False)
     return train_transformer_fold(
         "DeBERTa FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -2973,7 +3023,7 @@ def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, 
     kwargs.setdefault("lr_backbone", 2.2e-5)
     kwargs.setdefault("lr_head", 1.2e-4)
     kwargs.setdefault("layer_decay", 0.85)
-    kwargs.setdefault("enable_grad_checkpointing", True)
+    kwargs.setdefault("enable_grad_checkpointing", False)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
         group_ids_tr=group_ids_tr, **kwargs
@@ -3215,6 +3265,7 @@ def _train_qwen_lora_fold_impl(
     pure_qwen_sec = 0.0
     first_step_overhead = 0.0
     n_total_micros_executed = 0
+    steady_samples_executed = 0
     stop_early = False
     n_skipped_micros = 0
     n_oom_skips = 0
@@ -3238,6 +3289,8 @@ def _train_qwen_lora_fold_impl(
         epoch_loss = 0.0
         n_batches = 0
         accumulated_steps = 0
+        ep_samples = 0
+        ep_steady_samples = 0
 
         prefetcher = FastBatchPrefetcher(
             tokenizer, enc_tr, y_tr_int, epoch_indices, batch_size,
@@ -3323,6 +3376,11 @@ def _train_qwen_lora_fold_impl(
                     epoch_loss += loss_val
                     n_batches += 1
                     n_total_micros_executed += 1
+                    n_b = int(batch_labels.numel())
+                    ep_samples += n_b
+                    if not (epoch == 0 and micro_step == 0):
+                        steady_samples_executed += n_b
+                        ep_steady_samples += n_b
                     accumulated_steps += 1
 
                     if accumulated_steps == grad_accum:
@@ -3349,10 +3407,10 @@ def _train_qwen_lora_fold_impl(
                     if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
                         if t_step1_done is not None and micro_step > 0:
                             step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                            step_sps = min(micro_step * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_steady_samples / step_elapsed
                         else:
                             step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
-                            step_sps = min((micro_step + 1) * batch_size, len(texts_tr)) / step_elapsed
+                            step_sps = ep_samples / step_elapsed
                         step_loss = epoch_loss / max(n_batches, 1)
                         pct = ((micro_step + 1) / n_total_micros) * 100.0
                         print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
@@ -3401,10 +3459,9 @@ def _train_qwen_lora_fold_impl(
             break
 
     qwen_dur = time.perf_counter() - t_qwen_train_start
-    if n_total_micros_executed > 1 and first_step_overhead > 0.0:
-        steady_samples = max(n_total_micros_executed - 1, 1) * batch_size
+    if n_total_micros_executed > 1 and steady_samples_executed > 0 and first_step_overhead > 0.0:
         steady_sec = max(pure_qwen_sec - first_step_overhead, 0.001)
-        qwen_sps = steady_samples / steady_sec
+        qwen_sps = steady_samples_executed / steady_sec
     else:
         qwen_sps = (len(texts_tr) * max(epoch + 1, 1)) / max(pure_qwen_sec, 0.01)
     train_qwen_lora_fold.last_throughput = qwen_sps
@@ -4614,7 +4671,7 @@ def run_quad_ensemble():
         run_bge = bge_dir is not None and (time.perf_counter() + bge_expected + SAFETY_MARGIN_SEC < pipeline_deadline)
 
         if run_deb and run_bge and n_gpus >= 2:
-            print(f"\n[Fold {fold+1}] Launching CONCURRENT Dual-GPU Training: DeBERTa ({deb_dev}, BS=16, GA=1, ckpt=ON) || BGE ({bge_dev}, BS=20, GA=1, ckpt=ON)", flush=True)
+            print(f"\n[Fold {fold+1}] Launching CONCURRENT Dual-GPU Training: DeBERTa ({deb_dev}, BS=16, GA=1, ckpt=OFF) || BGE ({bge_dev}, BS=20, GA=1, ckpt=OFF)", flush=True)
             t_par_start = time.perf_counter()
 
             def _train_deb_worker():
@@ -4623,7 +4680,7 @@ def run_quad_ensemble():
                     deberta_dir, LABELS,
                     device=deb_dev,
                     batch_size=16, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
+                    epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=False,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     **deb_kw,
@@ -4635,7 +4692,7 @@ def run_quad_ensemble():
                     bge_dir, LABELS,
                     device=bge_dev,
                     batch_size=20, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
+                    epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=False,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     **bge_kw,
@@ -4679,14 +4736,14 @@ def run_quad_ensemble():
         else:
             if run_deb:
                 try:
-                    print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
+                    print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=OFF)", flush=True)
                     m_t0 = time.perf_counter()
                     val_deb, test_deb = train_deberta_fold(
                         texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                         deberta_dir, LABELS,
                         device=deb_dev,
                         batch_size=16, grad_accum=1, max_length=448,
-                        epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
+                        epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=False,
                         deadline=pipeline_deadline,
                         group_ids_tr=group_ids[tr_idx],
                         **deb_kw,
@@ -4706,14 +4763,14 @@ def run_quad_ensemble():
 
             if run_bge:
                 try:
-                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
+                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=OFF)", flush=True)
                     m_t0 = time.perf_counter()
                     val_bge, test_bge = train_bge_fold(
                         texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                         bge_dir, LABELS,
                         device=bge_dev,
                         batch_size=20, grad_accum=1, max_length=448,
-                        epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
+                        epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=False,
                         deadline=pipeline_deadline,
                         group_ids_tr=group_ids[tr_idx],
                         **bge_kw,

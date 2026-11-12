@@ -2839,7 +2839,7 @@ def _train_transformer_fold_impl(
             best_state = {k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names}
 
         # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 1):
+        if epoch >= max(epochs - 2, 0):
             epoch_states.append({k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names and v.is_floating_point()})
 
         if stop_early:
@@ -3393,7 +3393,7 @@ def _train_qwen_lora_fold_impl(
             best_head_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
 
         # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 1):
+        if epoch >= max(epochs - 2, 0):
             epoch_lora_states.append({k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k and v.is_floating_point()})
             epoch_head_states.append({k: v.cpu().clone() for k, v in head.state_dict().items() if v.is_floating_point()})
 
@@ -4550,9 +4550,10 @@ def run_quad_ensemble():
     print("STEP 2: 5-FOLD PROMPT-GROUPED CROSS-VALIDATION", flush=True)
     print("=" * 65, flush=True)
 
+    is_qwen3 = qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower())
     N_EPOCHS_DEB = 4
     N_EPOCHS_BGE = 5
-    N_EPOCHS_QWEN = 3
+    N_EPOCHS_QWEN = 2 if is_qwen3 else 3
     MAX_WALLCLOCK_HOURS = 8.2
     SAFETY_MARGIN_SEC = 1200  # 20 min buffer for final bagging, Sinkhorn, and submission
     pipeline_t0 = SCRIPT_T0
@@ -4738,11 +4739,12 @@ def run_quad_ensemble():
                     torch.cuda.empty_cache()
 
         # ── 3. Qwen LoRA fine-tune (Dual GPU) ───────────
-        is_qwen3 = qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower())
         qwen_bs = 8 if is_qwen3 else 16
         qwen_ga = 2 if is_qwen3 else 1
+        qwen_lr_lora = 1.5e-4 if is_qwen3 else 1.2e-4
+        qwen_lr_head = 2.2e-4 if is_qwen3 else 1.8e-4
         qwen_desc = "Qwen 3 8B" if is_qwen3 else "Qwen 2.5 7B"
-        qwen_expected = np.mean(model_durations["qwen"]) * 1.15 if model_durations["qwen"] else 1800.0
+        qwen_expected = np.mean(model_durations["qwen"]) * 1.15 if model_durations["qwen"] else (3300.0 if is_qwen3 else 2400.0)
         if qwen_dir is not None and (time.perf_counter() + qwen_expected + SAFETY_MARGIN_SEC < pipeline_deadline):
             try:
                 print(f"\n[Fold {fold+1}] {qwen_desc} LoRA fine-tune (device_map=auto, r=48, BS={qwen_bs}, GA={qwen_ga}, epochs={N_EPOCHS_QWEN}, L=448)", flush=True)
@@ -4752,7 +4754,7 @@ def run_quad_ensemble():
                     texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
                     batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=N_EPOCHS_QWEN,
-                    lr_lora=1.2e-4, lr_head=1.8e-4, lora_r=48, lora_alpha=96, lora_dropout=0.08,
+                    lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=48, lora_alpha=96, lora_dropout=0.08,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     retain_backbone=retain_qwen,

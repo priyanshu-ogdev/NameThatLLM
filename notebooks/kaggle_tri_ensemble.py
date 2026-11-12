@@ -388,7 +388,7 @@ def align_external_dense_moments(
     w_norm = w_ext[:, None] / max(float(w_ext.sum()), eps)
     mu_ext = np.sum(V_ext * w_norm, axis=0, keepdims=True)
     var_ext = np.sum(w_norm * (V_ext - mu_ext) ** 2, axis=0, keepdims=True)
-    std_ext = np.sqrt(np.maximum(var_ext, eps))
+    std_ext = np.maximum(np.sqrt(np.maximum(var_ext, 0.0)), eps)
 
     mu_comp = V_comp.mean(axis=0, keepdims=True)
     std_comp = np.maximum(V_comp.std(axis=0, keepdims=True), eps)
@@ -490,14 +490,22 @@ def tokenize_with_head_tail(tokenizer, texts, max_length=448, head_tokens=None, 
     for i in range(len(prep_texts)):
         ids = enc["input_ids"][i]
         mask = enc["attention_mask"][i]
-        if len(ids) > max_length:
+        if len(ids) == 0:
+            fallback_id = getattr(tokenizer, "pad_token_id", None)
+            if fallback_id is None:
+                fallback_id = getattr(tokenizer, "eos_token_id", 0) or 0
+            ids = [int(fallback_id)]
+            mask = [1]
+        elif len(ids) > max_length:
             ids = ids[:head_tokens] + ids[-tail_tokens:]
             mask = mask[:head_tokens] + mask[-tail_tokens:]
         input_ids_list.append(ids)
         attention_mask_list.append(mask)
         if has_token_types:
             ttypes = enc["token_type_ids"][i]
-            if len(ttypes) > max_length:
+            if len(ttypes) == 0:
+                ttypes = [0]
+            elif len(ttypes) > max_length:
                 ttypes = ttypes[:head_tokens] + ttypes[-tail_tokens:]
             token_type_ids_list.append(ttypes)
 
@@ -1157,7 +1165,8 @@ class IntraFamilyCliqueSpecialist(BaseEstimator):
             if w_fam is not None and w_fam.sum() > 0:
                 w_fam = w_fam * (len(w_fam) / w_fam.sum())
 
-            clf = RidgeClassifier(alpha=self.alpha_ridge, random_state=self.seed)
+            cw_fam = None if w_fam is not None else "balanced"
+            clf = RidgeClassifier(alpha=self.alpha_ridge, class_weight=cw_fam, random_state=self.seed)
             clf.fit(X_fam, y_fam, sample_weight=w_fam)
             self.specialists_[fam] = (clf, list(clf.classes_))
         return self
@@ -1248,13 +1257,22 @@ class StyleInvariantSubspaceProjector(BaseEstimator):
         else:
             X_res = X_c
 
-        unique_p, counts = np.unique(prompt_ids, return_counts=True)
-        multi_p = unique_p[counts >= 2]
-        k = min(self.n_topic_components, len(multi_p) - 1, X.shape[1] - 1)
+        codes, uniques = pd.factorize(prompt_ids)
+        valid_c = codes >= 0
+        if not np.all(valid_c):
+            codes = codes[valid_c]
+            X_res_v = X_res[valid_c]
+        else:
+            X_res_v = X_res
+        counts = np.bincount(codes)
+        multi_codes = np.where(counts >= 2)[0]
+        k = min(self.n_topic_components, len(multi_codes) - 1, X.shape[1] - 1)
         if k <= 0:
             return self
 
-        centroids = np.array([X_res[prompt_ids == p].mean(axis=0) for p in multi_p], dtype=np.float32)
+        sums = np.zeros((len(counts), X_res_v.shape[1]), dtype=np.float32)
+        np.add.at(sums, codes, X_res_v)
+        centroids = (sums[multi_codes] / counts[multi_codes, None]).astype(np.float32)
         try:
             _, _, Vt = np.linalg.svd(centroids, full_matrices=False)
             k_actual = min(k, Vt.shape[0])
@@ -1792,9 +1810,8 @@ class BalancedLogitAdjustedLDAMLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         targets = targets.to(device=logits.device, dtype=torch.long)
-        num_classes = logits.size(-1)
-        one_hot = F.one_hot(targets, num_classes=num_classes).type_as(logits)
-        margin_logits = logits - one_hot * self.margins.unsqueeze(0).to(logits.device)
+        target_margins = self.margins.to(logits.device)[targets].unsqueeze(1)
+        margin_logits = logits.scatter_add(1, targets.unsqueeze(1), -target_margins)
         adjusted_logits = margin_logits + self.log_priors.unsqueeze(0).to(logits.device)
 
         log_probs = F.log_softmax(adjusted_logits.float(), dim=-1)
@@ -1977,12 +1994,28 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9), target_pooler
     If target_pooler is provided, injects the captured layers directly into the pooler
     before it executes. Resets captured state at the earliest layer to support lifecycle
     across multiple micro-batches without hook re-registration overhead.
+    Uses recursive layer discovery to navigate arbitrary HF/PEFT wrapper nesting.
     """
-    base_m = getattr(model, "base_model", model)
-    inner_m = getattr(base_m, "encoder", getattr(base_m, "deberta", getattr(base_m, "bert", getattr(base_m, "model", base_m))))
-    dec_layers = getattr(inner_m, "layer", getattr(inner_m, "layers", getattr(getattr(inner_m, "encoder", None), "layer", None)))
-    if dec_layers is None and hasattr(model, "encoder") and hasattr(model.encoder, "layer"):
-        dec_layers = model.encoder.layer
+    def _find_layers(m, depth=0):
+        if depth > 6 or m is None:
+            return None
+        if hasattr(m, "layers") and isinstance(m.layers, (nn.ModuleList, tuple, list)):
+            return m.layers
+        if hasattr(m, "layer") and isinstance(m.layer, (nn.ModuleList, tuple, list)):
+            return m.layer
+        for child_name in ["base_model", "model", "encoder", "transformer", "bert", "deberta", "roberta"]:
+            if hasattr(m, child_name):
+                res = _find_layers(getattr(m, child_name), depth + 1)
+                if res is not None:
+                    return res
+        for child in m.children():
+            if hasattr(child, "layers") and isinstance(child.layers, (nn.ModuleList, tuple, list)):
+                return child.layers
+            if hasattr(child, "layer") and isinstance(child.layer, (nn.ModuleList, tuple, list)):
+                return child.layer
+        return None
+
+    dec_layers = _find_layers(model)
     captured = {}
     handles = []
     if dec_layers is not None:
@@ -2008,6 +2041,7 @@ def capture_intermediate_layers(model, layer_indices=(-1, -5, -9), target_pooler
             h.remove()
         if target_pooler is not None:
             target_pooler._extra_layers = None
+        captured.clear()
 
 
 def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev, cuda_ok, num_classes, enc_data_tta=None):
@@ -2227,11 +2261,18 @@ def train_transformer_fold(
             model.resize_token_embeddings(len(tokenizer))
             emb_module = model.get_input_embeddings()
         with torch.no_grad():
+            rng_emb = torch.Generator().manual_seed(42)
+            emb_std = float(emb_module.weight[:min(len(tokenizer), 30000)].std().clamp(min=1e-4))
             for new_tok, src_tok in (("[NL]", "."), ("[PAR]", "|")):
                 n_id = tokenizer.convert_tokens_to_ids(new_tok)
                 s_id = tokenizer.convert_tokens_to_ids(src_tok)
-                if n_id is not None and s_id is not None and max(n_id, s_id) < emb_module.weight.shape[0]:
-                    emb_module.weight[n_id].copy_(emb_module.weight[s_id])
+                if n_id is not None and 0 <= n_id < emb_module.weight.shape[0]:
+                    if s_id is not None and 0 <= s_id < emb_module.weight.shape[0] and s_id != getattr(tokenizer, "unk_token_id", -1):
+                        base_vec = emb_module.weight[s_id].clone()
+                    else:
+                        base_vec = emb_module.weight[:min(1000, emb_module.weight.shape[0])].mean(dim=0).clone()
+                    ortho_delta = torch.randn(emb_module.weight.shape[1], generator=rng_emb, dtype=base_vec.dtype) * (0.5 * emb_std)
+                    emb_module.weight[n_id].copy_(base_vec + ortho_delta.to(base_vec.device))
 
         try:
             with RAM_CACHE_LOCK:
@@ -2264,10 +2305,12 @@ def train_transformer_fold(
         elif hasattr(model, "deberta") and hasattr(model.deberta, "pooler"):
             model.deberta.pooler = pooler_instance
 
+    use_reentrant_ckpt = False
     if enable_grad_checkpointing:
         try:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         except TypeError:
+            use_reentrant_ckpt = True
             model.gradient_checkpointing_enable()
 
     if n_frozen_bottom_layers > 0:
@@ -2277,16 +2320,6 @@ def train_transformer_fold(
             if embeddings is not None:
                 for p in embeddings.parameters():
                     p.requires_grad = False
-                # Partial unfreeze: unfreeze word_embeddings and mask gradients so only [NL] and [PAR] receive updates
-                emb_mod = getattr(embeddings, "word_embeddings", getattr(embeddings, "weight", None))
-                if emb_mod is not None and hasattr(emb_mod, "weight") and emb_mod.weight.shape[0] >= len(tokenizer):
-                    emb_mod.weight.requires_grad = True
-                    n_special = 2
-                    def _freeze_pretrained_tokens_hook(grad):
-                        mask = torch.zeros_like(grad)
-                        mask[-n_special:, :] = 1.0  # Only allow gradients for the last 2 new tokens ([NL], [PAR])
-                        return grad * mask
-                    emb_mod.weight.register_hook(_freeze_pretrained_tokens_hook)
         encoder = getattr(base_m, "encoder", None) if base_m is not None else None
         if encoder is not None:
             rel_embeddings = getattr(encoder, "rel_embeddings", None)
@@ -2299,7 +2332,7 @@ def train_transformer_fold(
                 for l_idx in range(n_freeze):
                     for p in layers[l_idx].parameters():
                         p.requires_grad = False
-                print(f"  [{model_name}] Frozen bottom {n_freeze} layers + pretrained embeddings (skips lower syntax backward, [NL]/[PAR] active).", flush=True)
+                print(f"  [{model_name}] Frozen bottom {n_freeze} layers + embeddings (true zero-grad skip on layers 0..{n_freeze-1}, saves 1.5GB+ VRAM).", flush=True)
 
     model = model.to(dev)
     gc.collect()
@@ -2377,6 +2410,7 @@ def train_transformer_fold(
             topic_prep = None
 
     trainable_params = [p for p in model.parameters() if p.requires_grad]
+    trainable_names = {n for n, p in model.named_parameters() if p.requires_grad}
 
     for epoch in range(epochs):
         model.train()
@@ -2416,7 +2450,8 @@ def train_transformer_fold(
                             if topic_prep is not None and topic_prep.sift_eps > 0:
                                 emb = model.get_input_embeddings()(batch_kwargs["input_ids"])
                                 emb = topic_prep.apply_sift_embedding_noise(emb, batch_kwargs["attention_mask"])
-                                emb = emb.requires_grad_(True)
+                                if n_frozen_bottom_layers == 0 or use_reentrant_ckpt:
+                                    emb = emb.requires_grad_(True)
                                 kw_forward = {
                                     "inputs_embeds": emb,
                                     "attention_mask": batch_kwargs["attention_mask"],
@@ -2517,14 +2552,14 @@ def train_transformer_fold(
         if accumulated_steps > 0:
             if use_amp:
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 old_scale = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
                 if scaler.get_scale() >= old_scale:
                     scheduler.step()
             else:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
                 optimizer.step()
                 scheduler.step()
             optimizer.zero_grad(set_to_none=True)
@@ -2540,11 +2575,11 @@ def train_transformer_fold(
         if val_score > best_val_score:
             best_val_score = val_score
             best_val_logits = val_logits
-            best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items() if k in trainable_names}
 
-        # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs
+        # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs
         if epoch >= max(epochs - 2, 1):
-            epoch_states.append({k: v.detach().cpu() for k, v in model.state_dict().items() if v.is_floating_point()})
+            epoch_states.append({k: v.detach().cpu().clone() for k, v in model.state_dict().items() if k in trainable_names and v.is_floating_point()})
 
         if stop_early:
             break
@@ -2569,9 +2604,10 @@ def train_transformer_fold(
             swa_w = swa_w / swa_w.sum()
             swa_state = {}
             for k in epoch_states[0]:
-                view_shape = [-1] + [1] * epoch_states[0][k].ndim
-                w = swa_w.view(*view_shape)
-                swa_state[k] = (torch.stack([s[k] for s in epoch_states]) * w).sum(dim=0)
+                acc = epoch_states[0][k] * float(swa_w[0])
+                for idx_s in range(1, len(epoch_states)):
+                    acc = acc + epoch_states[idx_s][k] * float(swa_w[idx_s])
+                swa_state[k] = acc
             model.load_state_dict({k: v.to(dev) for k, v in swa_state.items()}, strict=False)
             swa_val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
             swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_logits, axis=1))
@@ -2579,15 +2615,15 @@ def train_transformer_fold(
             if swa_val_score >= best_val_score:
                 best_val_score = swa_val_score
                 best_val_logits = swa_val_logits
-                best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+                best_state = swa_state
             elif best_state is not None:
-                model.load_state_dict({k: v.to(dev) for k, v in best_state.items()})
+                model.load_state_dict({k: v.to(dev) for k, v in best_state.items()}, strict=False)
         except Exception as e:
             print(f"  [{model_name}] SWA averaging fallback: {e}", flush=True)
             if best_state is not None:
-                model.load_state_dict({k: v.to(dev) for k, v in best_state.items()})
+                model.load_state_dict({k: v.to(dev) for k, v in best_state.items()}, strict=False)
     elif best_state is not None:
-        model.load_state_dict({k: v.to(dev) for k, v in best_state.items()})
+        model.load_state_dict({k: v.to(dev) for k, v in best_state.items()}, strict=False)
 
     test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels), enc_data_tta=cached_enc_te_tta)
 
@@ -2708,7 +2744,18 @@ def train_qwen_lora_fold(
         if dev_map is not None and n_gpus >= 2:
             try:
                 from accelerate import dispatch_model
-                backbone = dispatch_model(backbone, device_map=dev_map)
+                mod_names = {name for name, _ in backbone.named_modules()}
+                aligned_map = {}
+                for k, v in dev_map.items():
+                    if k in mod_names:
+                        aligned_map[k] = v
+                    elif f"base_model.model.{k}" in mod_names:
+                        aligned_map[f"base_model.model.{k}"] = v
+                    elif f"base_model.{k}" in mod_names:
+                        aligned_map[f"base_model.{k}"] = v
+                    elif k == "":
+                        aligned_map[""] = v
+                backbone = dispatch_model(backbone, device_map=aligned_map)
             except Exception as e:
                 print(f"  [Qwen LoRA] accelerate dispatch notice: {e}; moving to GPU", flush=True)
                 if cuda_ok:
@@ -2757,8 +2804,19 @@ def train_qwen_lora_fold(
         )
         backbone = get_peft_model(backbone, lora_cfg)
         backbone.print_trainable_parameters()
-        if hasattr(backbone, "hf_device_map"):
-            GLOBAL_RAM_MODEL_CACHE["qwen_device_map"] = copy.deepcopy(backbone.hf_device_map)
+        if hasattr(backbone, "hf_device_map") and backbone.hf_device_map:
+            mod_names = {name for name, _ in backbone.named_modules()}
+            aligned_save_map = {}
+            for k, v in backbone.hf_device_map.items():
+                if k in mod_names:
+                    aligned_save_map[k] = v
+                elif f"base_model.model.{k}" in mod_names:
+                    aligned_save_map[f"base_model.model.{k}"] = v
+                elif f"base_model.{k}" in mod_names:
+                    aligned_save_map[f"base_model.{k}"] = v
+                elif k == "":
+                    aligned_save_map[""] = v
+            GLOBAL_RAM_MODEL_CACHE["qwen_device_map"] = copy.deepcopy(aligned_save_map)
 
     first_dev = next(backbone.parameters()).device
     last_dev = first_dev
@@ -2922,12 +2980,12 @@ def train_qwen_lora_fold(
                         if math.isnan(loss_val) or math.isinf(loss_val):
                             n_skipped_micros += 1
                             print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
-                        if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
-                            raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
-                        if accumulated_steps > 0:
-                            optimizer.zero_grad(set_to_none=True)
-                            accumulated_steps = 0
-                        continue
+                            if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
+                                raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
+                            if accumulated_steps > 0:
+                                optimizer.zero_grad(set_to_none=True)
+                                accumulated_steps = 0
+                            continue
 
                     except torch.cuda.OutOfMemoryError:
                         n_oom_skips += 1
@@ -3111,12 +3169,10 @@ def train_qwen_lora_fold(
 
     gc.collect()
     if cuda_ok:
-        for gi in (first_dev, head_dev):
-            if str(gi).startswith("cuda"):
-                dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
-                with torch.cuda.device(dev_idx):
-                    torch.cuda.synchronize(dev_idx)
-                    torch.cuda.empty_cache()
+        for dev_idx in range(torch.cuda.device_count()):
+            with torch.cuda.device(dev_idx):
+                torch.cuda.synchronize(dev_idx)
+                torch.cuda.empty_cache()
 
     return best_val_logits, test_logits
 
@@ -3411,19 +3467,48 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     q_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5] if qwn_p is not None else [0.0]
     b_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0] if bge_p is not None else [0.0]
 
+    # Precompute invariant Stage 1 Router family probabilities across the entire grid search
+    r_weights = (0.30, 0.25, 0.30, 0.15)
+    r_models = [svm_p, deb_p, qwn_p, bge_p]
+    w_r_eff = [w if m is not None else 0.0 for w, m in zip(r_weights, r_models)]
+    sum_r = max(sum(w_r_eff), 1e-6)
+    p_router = np.zeros_like(svm_p)
+    for m, wr in zip(r_models, w_r_eff):
+        if m is not None:
+            p_router += (wr / sum_r) * m
+    p_router /= np.maximum(p_router.sum(axis=-1, keepdims=True), 1e-12)
+    p_family_dict = {fam: np.sum(p_router[:, idxs], axis=-1, keepdims=True) for fam, idxs in FAMILY_TO_INDICES.items()}
+    N_val = len(y_val)
+    do_sinkhorn = N_val >= 36
+
     for ws in s_cands:
         for wd in d_cands:
             for wq in q_cands:
                 for wb in b_cands:
+                    if ws + wd + wq + wb <= 0.0:
+                        continue
                     cand_weights = (ws, wd, wq, wb)
-                    blend_p = compute_hierarchical_tree_probs(
-                        p_svm=svm_p, p_deb=deb_p, p_qwen=qwn_p, p_bge=bge_p,
-                        router_weights=(0.30, 0.25, 0.30, 0.15),
-                        expert_weights=cand_weights,
-                        hierarchy_alpha=0.65,
-                    )
-                    if len(blend_p) >= 36:
-                        blend_p = sinkhorn_knopp_balance(blend_p)
+                    w_e_eff = [w if m is not None else 0.0 for w, m in zip(cand_weights, r_models)]
+                    sum_e = max(sum(w_e_eff), 1e-6)
+                    p_expert = np.zeros_like(svm_p)
+                    for m, we in zip(r_models, w_e_eff):
+                        if m is not None and we > 0.0:
+                            p_expert += (we / sum_e) * m
+                    p_expert /= np.maximum(p_expert.sum(axis=-1, keepdims=True), 1e-12)
+
+                    p_hier = np.zeros_like(svm_p)
+                    for fam, idxs in FAMILY_TO_INDICES.items():
+                        if len(idxs) > 1:
+                            sub_mass = np.sum(p_expert[:, idxs], axis=-1, keepdims=True)
+                            p_sib = p_expert[:, idxs] / np.maximum(sub_mass, 1e-12)
+                        else:
+                            p_sib = np.ones((N_val, 1), dtype=np.float64)
+                        p_hier[:, idxs] = p_family_dict[fam] * p_sib
+
+                    blend_p = 0.65 * p_hier + 0.35 * p_expert
+                    blend_p /= np.maximum(blend_p.sum(axis=-1, keepdims=True), 1e-12)
+                    if do_sinkhorn:
+                        blend_p = sinkhorn_knopp_balance(blend_p, max_iters=20, tol=2e-3)
                     pred_idx = np.argmax(blend_p, axis=1)
                     score = balanced_accuracy_score(y_val, pred_idx)
                     if score > best_score:
@@ -3431,20 +3516,22 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
                         best_w = cand_weights
 
     # Fine-tune hierarchical tree alpha on the optimal expert weights
+    best_score_final = -1.0
     for cand_alpha in [0.0, 0.20, 0.35, 0.50, 0.65, 0.75, 0.85]:
         tree_p = compute_hierarchical_tree_probs(
             p_svm=svm_p, p_deb=deb_p, p_qwen=qwn_p, p_bge=bge_p,
-            router_weights=(0.30, 0.25, 0.30, 0.15),
+            router_weights=r_weights,
             expert_weights=best_w,
             hierarchy_alpha=cand_alpha,
         )
-        if len(tree_p) >= 36:
-            tree_p = sinkhorn_knopp_balance(tree_p)
+        if do_sinkhorn:
+            tree_p = sinkhorn_knopp_balance(tree_p, max_iters=50, tol=1e-3)
         pred_idx = np.argmax(tree_p, axis=1)
         score = balanced_accuracy_score(y_val, pred_idx)
-        if score > best_score:
-            best_score = score
+        if score > best_score_final:
+            best_score_final = score
             best_alpha = cand_alpha
+    best_score = best_score_final
 
     return best_w, best_alpha, best_score
 
@@ -3517,8 +3604,8 @@ class TransductivePromptCenterer:
         if X_sparse is None or X_sparse.shape[0] <= self.k_neighbors:
             return self
         try:
-            # Exclude the last 132 dense stylometric columns so similarity reflects pure prompt topic
-            X_lex = X_sparse[:, :-132] if X_sparse.shape[1] > 1000 else X_sparse
+            # Exclude the last 145 dense stylometric columns so similarity reflects pure prompt topic
+            X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 1000 else X_sparse
             row_norms = np.sqrt(np.asarray(X_lex.power(2).sum(axis=1)).ravel())
             row_norms = np.maximum(row_norms, 1e-12)
             X_norm = sp.diags(1.0 / row_norms) @ X_lex
@@ -4119,7 +4206,7 @@ def run_quad_ensemble():
                     texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     bge_dir, LABELS,
                     device=bge_dev,
-                    batch_size=16, grad_accum=1, max_length=448,
+                    batch_size=20, grad_accum=1, max_length=448,
                     epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
@@ -4191,13 +4278,13 @@ def run_quad_ensemble():
 
             if run_bge:
                 try:
-                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
+                    print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
                     m_t0 = time.perf_counter()
                     val_bge, test_bge = train_bge_fold(
                         texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                         bge_dir, LABELS,
                         device=bge_dev,
-                        batch_size=16, grad_accum=1, max_length=448,
+                        batch_size=20, grad_accum=1, max_length=448,
                         epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
                         deadline=pipeline_deadline,
                         group_ids_tr=group_ids[tr_idx],
@@ -4460,6 +4547,12 @@ def run_quad_ensemble():
     lbl2id = {l: i for i, l in enumerate(LABELS)}
     y_true_int = np.array([lbl2id[y] for y in y_true], dtype=np.int64)
 
+    # Preserve pre-centering OOF references for exact apples-to-apples test dispersion matching (tiny <1.5 MB)
+    oof_svm_uncentered = oof_svm
+    oof_deb_uncentered = oof_deb
+    oof_qwen_uncentered = oof_qwen
+    oof_bge_uncentered = oof_bge
+
     # ── Transductive Same-Prompt Neighbor Centering (OOF Graph & Monotonic Tuning) ──
     oof_centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22).fit_graph(X_train_all)
     eta_svm = oof_centerer.optimize_eta(oof_svm, y_true_int)
@@ -4479,6 +4572,7 @@ def run_quad_ensemble():
     calibrated_temps = (T_svm, T_deb, T_qwn, T_bge)
     print(f"\n  Calibrated Temperatures (NLL-optimal): SVM={T_svm} DeBERTa={T_deb} Qwen={T_qwn} BGE={T_bge}", flush=True)
 
+    blend_score = 0.0
     try:
         best_w, best_alpha, blend_score = optimize_blend_weights(
             oof_svm,
@@ -4576,10 +4670,10 @@ def run_quad_ensemble():
         print("STEP 4: COMPUTING BAGGED TEST PREDICTIONS & FINAL SUBMISSION", flush=True)
         print("=" * 65, flush=True)
         n_test = len(texts_test)
-        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm) if test_svm_folds else np.zeros((n_test, NUM_CLASSES))
-        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb)
-        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge)
-        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen)
+        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm_uncentered) if test_svm_folds else np.zeros((n_test, NUM_CLASSES))
+        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb_uncentered)
+        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge_uncentered)
+        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen_uncentered)
 
         # Transductive prompt-topic centering on unseen test passages using learned per-stream OOF etas
         test_centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22).fit_graph(X_test_all)

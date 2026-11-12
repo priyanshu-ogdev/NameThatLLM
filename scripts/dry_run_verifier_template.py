@@ -272,6 +272,41 @@ def run_dry_run_verifier():
     assert mock_qlogits.shape == (2, NUM_CLASSES), "Spike & Gap Head output shape mismatch"
     print("  SpikeAndGapHierarchicalHead multi-layer hidden state fusion (-1, -5, -9) verified [OK]")
 
+    # Unit-verify recursive layer discovery & forward hooks across nested PEFT/HF wrappers
+    class _MockLayer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(16, 16)
+        def forward(self, x):
+            return (self.linear(x),)
+    class _MockInner(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = nn.ModuleList([_MockLayer() for _ in range(12)])
+        def forward(self, x):
+            for l in self.layers:
+                x = l(x)[0]
+            return x
+    class _MockClf(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = _MockInner()
+        def forward(self, x):
+            return self.model(x)
+    class _MockPeft(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base_model = nn.Module()
+            self.base_model.model = _MockClf()
+        def forward(self, x):
+            return self.base_model.model(x)
+    mock_peft = _MockPeft()
+    with capture_intermediate_layers(mock_peft, (-1, -5, -9)) as mock_caps:
+        _ = mock_peft(torch.randn(2, 4, 16))
+        assert -1 in mock_caps and -5 in mock_caps and -9 in mock_caps, "Hooks must capture all 3 layers through PEFT nesting"
+    assert len(mock_caps) == 0, "Hooks context manager must clear captured activations on exit"
+    print("  Recursive multi-layer hook capture across nested PEFT/HF wrappers verified [OK]")
+
     if qwen_dir is not None and cuda_ok:
         t0 = time.perf_counter()
         qwen_smoke_kw = {}

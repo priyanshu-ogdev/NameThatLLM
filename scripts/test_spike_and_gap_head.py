@@ -4,7 +4,7 @@ sys.path.insert(0, ".")
 import torch
 import torch.nn as nn
 import numpy as np
-from notebooks.kaggle_tri_ensemble import SpikeAndGapHierarchicalHead, StylometricMultiMomentPooler
+from notebooks.kaggle_tri_ensemble import SpikeAndGapHierarchicalHead, StylometricMultiMomentPooler, capture_intermediate_layers
 
 def test_spike_and_gap_hierarchical_head():
     print("Testing SpikeAndGapHierarchicalHead comprehensive mechanics...")
@@ -78,8 +78,50 @@ def test_stylometric_multi_moment_pooler():
     assert h.grad is not None and torch.all(torch.isfinite(h.grad)), "Pooler gradients must be finite"
     print("  [Pass] StylometricMultiMomentPooler verified.")
 
+def test_recursive_capture_intermediate_layers():
+    print("Testing recursive layer discovery in capture_intermediate_layers on nested PEFT architecture...")
+    class _MockLayer(nn.Module):
+        def __init__(self, d=32):
+            super().__init__()
+            self.linear = nn.Linear(d, d)
+        def forward(self, x):
+            return (self.linear(x),)
+
+    class _MockInner(nn.Module):
+        def __init__(self, n=12, d=32):
+            super().__init__()
+            self.layers = nn.ModuleList([_MockLayer(d) for _ in range(n)])
+        def forward(self, x):
+            for l in self.layers:
+                x = l(x)[0]
+            return x
+
+    class _MockClf(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = _MockInner()
+        def forward(self, x):
+            return self.model(x)
+
+    class _MockPeft(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.base_model = nn.Module()
+            self.base_model.model = _MockClf()
+        def forward(self, x):
+            return self.base_model.model(x)
+
+    mock_model = _MockPeft()
+    with capture_intermediate_layers(mock_model, (-1, -5, -9)) as caps:
+        x = torch.randn(2, 4, 32)
+        _ = mock_model(x)
+        assert -1 in caps and -5 in caps and -9 in caps, "Must capture -1, -5, -9 through nested PEFT layers"
+        assert caps[-1].shape == (2, 4, 32), "Captured layer shape mismatch"
+    print("  [Pass] Recursive layer discovery and hook capture on nested PEFT architecture verified.")
+
 if __name__ == "__main__":
     test_spike_and_gap_hierarchical_head()
     test_stylometric_multi_moment_pooler()
+    test_recursive_capture_intermediate_layers()
     print("\n>>> ALL SPIKE & GAP HEAD & POOLER TESTS PASSED 100%! <<<")
 

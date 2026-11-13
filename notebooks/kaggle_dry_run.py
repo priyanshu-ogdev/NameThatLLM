@@ -2062,11 +2062,14 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         if T > 1:
             diffs = torch.norm(hidden_states[:, 1:, :] - hidden_states[:, :-1, :], p=2, dim=-1)
             valid_pairs = (attention_mask[:, 1:] * attention_mask[:, :-1]).to(dtype=hidden_states.dtype)
-            # Mask out the single largest jump if T >= 400 so head+tail truncation splice never corrupts gap_max
-            if T >= 400 and T > 4:
+            # Mask out the single largest jump if T >= 440 so head+tail truncation splice never corrupts gap_max
+            # Only apply splice masking to sequences that actually underwent head+tail truncation (lengths >= 440)
+            if T >= 440 and T > 4:
                 masked_diffs_init = diffs.masked_fill(valid_pairs == 0, -1e4)
                 top1_idx = masked_diffs_init.argmax(dim=1, keepdim=True)
-                valid_pairs = valid_pairs.scatter(1, top1_idx, 0.0)
+                spl_mask = torch.ones_like(valid_pairs).scatter(1, top1_idx, 0.0)
+                is_trunc = (lengths >= 440).to(dtype=valid_pairs.dtype)
+                valid_pairs = valid_pairs * (1.0 - is_trunc) + (valid_pairs * spl_mask) * is_trunc
 
             pair_lens = torch.clamp(valid_pairs.sum(dim=1, keepdim=True), min=1.0)
 
@@ -4215,7 +4218,7 @@ def compute_hierarchical_tree_probs(
     sum_e = max(sum(w_e), 1e-6)
     w_e = [w / sum_e for w in w_e]
 
-    if router_weights is None or router_weights == expert_weights:
+    if router_weights is None or np.array_equal(router_weights, expert_weights):
         r_base = [w if m is not None else 0.0 for w, m in zip(base_rw, models)]
         sum_rb = max(sum(r_base), 1e-6)
         r_base = [w / sum_rb for w in r_base]
@@ -4528,18 +4531,21 @@ class TransductivePromptCenterer:
         try:
             # Exclude the last 145 dense stylometric columns so similarity reflects pure prompt topic
             X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 145 else X_sparse
-            X_lex = X_lex.astype(np.float32, copy=False)
-            row_norms = np.sqrt(np.asarray(X_lex.power(2).sum(axis=1)).ravel())
-            row_norms = np.maximum(row_norms, 1e-12).astype(np.float32)
-            X_norm = sp.diags(1.0 / row_norms, dtype=np.float32) @ X_lex
-
-            n = X_norm.shape[0]
-            if sp.issparse(X_norm) and X_norm.shape[1] > 500:
-                col_df = np.bincount(X_norm.indices, minlength=X_norm.shape[1])
+            if sp.issparse(X_lex):
+                X_lex = X_lex.astype(np.float32, copy=False).tocsr()
+            else:
+                X_lex = sp.csr_matrix(X_lex, dtype=np.float32)
+            n = X_lex.shape[0]
+            if X_lex.shape[1] > 500:
+                col_df = np.bincount(X_lex.indices, minlength=X_lex.shape[1])
                 max_df = max(int(0.40 * n), 2)
                 active_cols = np.flatnonzero((col_df >= 2) & (col_df <= max_df))
                 if len(active_cols) > 0:
-                    X_norm = X_norm[:, active_cols]
+                    X_lex = X_lex[:, active_cols]
+
+            row_norms = np.sqrt(np.asarray(X_lex.power(2).sum(axis=1)).ravel())
+            row_norms = np.maximum(row_norms, 1e-12).astype(np.float32)
+            X_norm = sp.diags(1.0 / row_norms, dtype=np.float32) @ X_lex
 
             S = (X_norm @ X_norm.T).toarray()
             np.fill_diagonal(S, -1.0)

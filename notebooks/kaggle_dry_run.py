@@ -4091,7 +4091,7 @@ class TransductivePromptCenterer:
             return self
         try:
             # Exclude the last 145 dense stylometric columns so similarity reflects pure prompt topic
-            X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 1000 else X_sparse
+            X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 145 else X_sparse
             X_lex = X_lex.astype(np.float32, copy=False)
             row_norms = np.sqrt(np.asarray(X_lex.power(2).sum(axis=1)).ravel())
             row_norms = np.maximum(row_norms, 1e-12).astype(np.float32)
@@ -4099,7 +4099,7 @@ class TransductivePromptCenterer:
 
             n = X_norm.shape[0]
             if sp.issparse(X_norm) and X_norm.shape[1] > 500:
-                col_df = np.diff(X_norm.tocsc().indptr)
+                col_df = np.bincount(X_norm.indices, minlength=X_norm.shape[1])
                 max_df = max(int(0.40 * n), 2)
                 active_cols = np.flatnonzero((col_df >= 2) & (col_df <= max_df))
                 if len(active_cols) > 0:

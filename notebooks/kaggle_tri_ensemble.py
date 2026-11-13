@@ -4091,7 +4091,7 @@ class TransductivePromptCenterer:
             return self
         try:
             # Exclude the last 145 dense stylometric columns so similarity reflects pure prompt topic
-            X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 1000 else X_sparse
+            X_lex = X_sparse[:, :-145] if X_sparse.shape[1] > 145 else X_sparse
             X_lex = X_lex.astype(np.float32, copy=False)
             row_norms = np.sqrt(np.asarray(X_lex.power(2).sum(axis=1)).ravel())
             row_norms = np.maximum(row_norms, 1e-12).astype(np.float32)
@@ -4099,7 +4099,7 @@ class TransductivePromptCenterer:
 
             n = X_norm.shape[0]
             if sp.issparse(X_norm) and X_norm.shape[1] > 500:
-                col_df = np.diff(X_norm.tocsc().indptr)
+                col_df = np.bincount(X_norm.indices, minlength=X_norm.shape[1])
                 max_df = max(int(0.40 * n), 2)
                 active_cols = np.flatnonzero((col_df >= 2) & (col_df <= max_df))
                 if len(active_cols) > 0:
@@ -5137,7 +5137,13 @@ def run_quad_ensemble():
                 if oof_bge is not None: avail_probs.append(margins_to_probs(oof_bge[stack_mask], temp=T_bge))
                 X_oof_stack = np.hstack(avail_probs)
                 groups_stack = group_ids[stack_mask]
-                ridge_preds = cross_val_predict(RidgeClassifier(alpha=1.0), X_oof_stack, y_stack, cv=StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42), groups=groups_stack)
+                n_groups_stack = len(np.unique(groups_stack)) if groups_stack is not None else 0
+                if n_groups_stack >= 5:
+                    cv_stack = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+                    ridge_preds = cross_val_predict(RidgeClassifier(alpha=1.0), X_oof_stack, y_stack, cv=cv_stack, groups=groups_stack)
+                else:
+                    cv_stack = StratifiedKFold(n_splits=min(5, max(2, len(y_stack) // 18)), shuffle=True, random_state=42)
+                    ridge_preds = cross_val_predict(RidgeClassifier(alpha=1.0), X_oof_stack, y_stack, cv=cv_stack)
                 ridge_score = balanced_accuracy_score(y_stack, ridge_preds)
                 print(f"  OOF RIDGE STACKER (5-Fold CV): {ridge_score*100:.2f}% (out-of-sample diagnostic)\n", flush=True)
     except Exception as e:
@@ -5148,10 +5154,10 @@ def run_quad_ensemble():
         print("=" * 65, flush=True)
         print("STEP 4: COMPUTING BAGGED TEST PREDICTIONS & FINAL SUBMISSION", flush=True)
         print("=" * 65, flush=True)
-        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm_uncentered) if (test_svm_folds and oof_svm_uncentered is not None) else None
-        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb_uncentered) if (test_deb_folds and oof_deb_uncentered is not None) else None
-        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge_uncentered) if (test_bge_folds and oof_bge_uncentered is not None) else None
-        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen_uncentered) if (test_qwen_folds and oof_qwen_uncentered is not None) else None
+        test_svm_m = bag_and_match_logit_dispersion(test_svm_folds, oof_svm_uncentered) if test_svm_folds else None
+        test_deb_m = bag_and_match_logit_dispersion(test_deb_folds, oof_deb_uncentered) if test_deb_folds else None
+        test_bge_m = bag_and_match_logit_dispersion(test_bge_folds, oof_bge_uncentered) if test_bge_folds else None
+        test_qwen_m = bag_and_match_logit_dispersion(test_qwen_folds, oof_qwen_uncentered) if test_qwen_folds else None
 
         # Transductive prompt-topic centering on unseen test passages using learned per-stream OOF etas
         test_centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22).fit_graph(X_test_all)

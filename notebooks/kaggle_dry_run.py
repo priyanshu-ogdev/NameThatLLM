@@ -2217,22 +2217,29 @@ class FocalLoss(nn.Module):
         else:
             self.sibling_margins = None
 
-        # Build intra-family sibling mask: (18, 18), mask[i, j] = 1.0 iff i and j share a family and i != j
+        # Build intra-family sibling mask: (18, 18), mask[i, j] = 1.0 / (len(idxs) - 1) iff i and j share a family and i != j
         intra_mask = torch.zeros((len(LABELS), len(LABELS)), dtype=torch.float32)
         for fam, idxs in FAMILY_TO_INDICES.items():
-            for i in idxs:
-                for j in idxs:
-                    if i != j:
-                        intra_mask[i, j] = 1.0
+            n_sibs = len(idxs) - 1
+            if n_sibs > 0:
+                norm_w = 1.0 / float(n_sibs)
+                for i in idxs:
+                    for j in idxs:
+                        if i != j:
+                            intra_mask[i, j] = norm_w
         self.register_buffer("intra_family_mask", intra_mask)
 
     def forward(self, logits, targets, sample_weights=None, margin_scale: float = 0.5):
         num_classes = logits.size(-1)
         targets = targets.to(device=logits.device, dtype=torch.long).clamp(0, num_classes - 1)
         logits_f = logits.float()
+        eff_m = self.intra_family_margin * margin_scale
         if self.use_sibling_margins and hasattr(self, "intra_family_mask") and self.intra_family_mask is not None and self.intra_family_mask.size(0) == num_classes:
-            sib_penalty = (self.intra_family_margin * margin_scale) * self.intra_family_mask.to(logits.device)[targets]
+            sib_penalty = eff_m * self.intra_family_mask.to(logits.device)[targets]
             logits_f = logits_f + sib_penalty
+            # Apply uniform target margin separation to all 18 classes (singleton-safe margin)
+            target_delta = torch.full((logits.size(0), 1), -0.5 * eff_m, device=logits.device, dtype=logits_f.dtype)
+            logits_f = logits_f.scatter_add(1, targets.unsqueeze(1), target_delta)
         elif self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
             sm = margin_scale * self.sibling_margins.to(logits.device)
             target_margins = sm[targets].unsqueeze(1)
@@ -2267,14 +2274,14 @@ def apply_column_mean_demeaning(
     val_logits: np.ndarray,
     y_val: np.ndarray,
     test_logits: np.ndarray = None,
-    taus=(0.0, 0.5, 1.0),
+    taus=(0.0, 0.25, 0.50, 0.75, 1.0),
 ) -> tuple[np.ndarray, np.ndarray | None, float]:
     """
     Validation-Tuned Prior Alignment (Column-Mean Demeaning):
       z_cal = z - tau_col * col_mean
     Subtracting the validation column mean centers each class logit, eliminating
     the stationary logit shift (+m_c) from training class weighting and sibling margins.
-    Tuned over tau in [0.0, 0.5, 1.0] to maximize Macro Balanced Accuracy on the validation fold.
+    Tuned over tau in [0.0, 0.25, 0.50, 0.75, 1.0] to maximize Macro Balanced Accuracy on the validation fold.
     Returns: (best_val_logits, best_test_logits_if_provided, best_tau)
     """
     if val_logits is None or len(val_logits) == 0:
@@ -2971,6 +2978,7 @@ def _train_transformer_fold_impl(
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp, init_scale=4096.0)
 
     best_val_score = -1.0
+    best_val_metric = -1e9
     best_val_logits = None
     best_state = None
     epoch_states = []
@@ -3204,12 +3212,16 @@ def _train_transformer_fold_impl(
             break
 
         val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
-        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.25, 0.50, 0.75, 1.0))
         val_preds = np.argmax(val_logits_cal, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
-        print(f"  [{model_name}] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.1f}) {get_mem_status(dev)}", flush=True)
+        val_probs_ep = margins_to_probs(val_logits_cal, temp=1.0)
+        val_nll_ep = float(-np.mean(np.log(np.clip(val_probs_ep[np.arange(len(y_va_int)), y_va_int], 1e-12, 1.0))))
+        val_metric_ep = val_score - 0.002 * val_nll_ep
+        print(f"  [{model_name}] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.2f}, NLL={val_nll_ep:.4f}) {get_mem_status(dev)}", flush=True)
 
-        if val_score > best_val_score:
+        if val_metric_ep > best_val_metric:
+            best_val_metric = val_metric_ep
             best_val_score = val_score
             best_val_logits = val_logits
             best_state = {k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names}
@@ -3246,10 +3258,14 @@ def _train_transformer_fold_impl(
                 swa_state[k] = acc
             model.load_state_dict({k: v.to(dev) for k, v in swa_state.items()}, strict=False)
             swa_val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
-            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.25, 0.50, 0.75, 1.0))
             swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_cal, axis=1))
-            print(f"  [{model_name}] SWA Checkpoint Averaged ({len(epoch_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.1f}, vs Best Single {best_val_score:.4f})", flush=True)
-            if swa_val_score >= best_val_score:
+            swa_probs = margins_to_probs(swa_val_cal, temp=1.0)
+            swa_nll = float(-np.mean(np.log(np.clip(swa_probs[np.arange(len(y_va_int)), y_va_int], 1e-12, 1.0))))
+            swa_val_metric = swa_val_score - 0.002 * swa_nll
+            print(f"  [{model_name}] SWA Checkpoint Averaged ({len(epoch_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.2f}, NLL={swa_nll:.4f}, vs Best Single {best_val_score:.4f})", flush=True)
+            if swa_val_metric >= best_val_metric:
+                best_val_metric = swa_val_metric
                 best_val_score = swa_val_score
                 best_val_logits = swa_val_logits
                 best_state = swa_state
@@ -3266,11 +3282,11 @@ def _train_transformer_fold_impl(
 
     if best_val_logits is not None:
         best_val_logits, test_logits, best_tau = apply_column_mean_demeaning(
-            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.5, 1.0)
+            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.25, 0.50, 0.75, 1.0)
         )
         best_val_score = float(balanced_accuracy_score(y_va_int, np.argmax(best_val_logits, axis=1)))
         if best_tau > 0.0:
-            print(f"  [{model_name}] Optimal Column-Mean Demeaning (tau={best_tau:.1f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
+            print(f"  [{model_name}] Optimal Column-Mean Demeaning (tau={best_tau:.2f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
 
     set_model_pooler_mask(model, None)
     del model, optimizer, scheduler, epoch_states
@@ -3640,6 +3656,7 @@ def _train_qwen_lora_fold_impl(
     scaler = torch.cuda.amp.GradScaler(enabled=cuda_ok, init_scale=4096.0)
 
     best_val_score = -1.0
+    best_val_metric = -1e9
     best_val_logits = None
     best_lora_state = None
     best_head_state = None
@@ -3852,12 +3869,16 @@ def _train_qwen_lora_fold_impl(
             print(f"  [Qwen LoRA] Time Guard triggered before any gradient step in Ep {epoch+1}; skipping untrained fold eval.", flush=True)
             break
         val_logits = evaluate_qwen_split(backbone, head, enc_va, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
-        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.25, 0.50, 0.75, 1.0))
         val_preds = np.argmax(val_logits_cal, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
-        print(f"  [Qwen LoRA] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.1f}) {get_mem_status()}", flush=True)
+        val_probs_ep = margins_to_probs(val_logits_cal, temp=1.0)
+        val_nll_ep = float(-np.mean(np.log(np.clip(val_probs_ep[np.arange(len(y_va_int)), y_va_int], 1e-12, 1.0))))
+        val_metric_ep = val_score - 0.002 * val_nll_ep
+        print(f"  [Qwen LoRA] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.2f}, NLL={val_nll_ep:.4f}) {get_mem_status()}", flush=True)
 
-        if val_score > best_val_score:
+        if val_metric_ep > best_val_metric:
+            best_val_metric = val_metric_ep
             best_val_score = val_score
             best_val_logits = val_logits
             best_lora_state = {k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k}
@@ -3900,10 +3921,14 @@ def _train_qwen_lora_fold_impl(
             backbone.load_state_dict(swa_lora, strict=False)
             head.load_state_dict(swa_head)
             swa_val_logits = evaluate_qwen_split(backbone, head, enc_va, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
-            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.25, 0.50, 0.75, 1.0))
             swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_cal, axis=1))
-            print(f"  [Qwen LoRA] SWA Checkpoint Averaged ({len(epoch_lora_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.1f}, vs Best Single {best_val_score:.4f})", flush=True)
-            if swa_val_score >= best_val_score:
+            swa_probs = margins_to_probs(swa_val_cal, temp=1.0)
+            swa_nll = float(-np.mean(np.log(np.clip(swa_probs[np.arange(len(y_va_int)), y_va_int], 1e-12, 1.0))))
+            swa_val_metric = swa_val_score - 0.002 * swa_nll
+            print(f"  [Qwen LoRA] SWA Checkpoint Averaged ({len(epoch_lora_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.2f}, NLL={swa_nll:.4f}, vs Best Single {best_val_score:.4f})", flush=True)
+            if swa_val_metric >= best_val_metric:
+                best_val_metric = swa_val_metric
                 best_val_score = swa_val_score
                 best_val_logits = swa_val_logits
                 best_lora_state = swa_lora
@@ -3929,11 +3954,11 @@ def _train_qwen_lora_fold_impl(
 
     if best_val_logits is not None:
         best_val_logits, test_logits, best_tau = apply_column_mean_demeaning(
-            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.5, 1.0)
+            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.25, 0.50, 0.75, 1.0)
         )
         best_val_score = float(balanced_accuracy_score(y_va_int, np.argmax(best_val_logits, axis=1)))
         if best_tau > 0.0:
-            print(f"  [Qwen LoRA] Optimal Column-Mean Demeaning (tau={best_tau:.1f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
+            print(f"  [Qwen LoRA] Optimal Column-Mean Demeaning (tau={best_tau:.2f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
 
     del head, optimizer, scheduler, epoch_lora_states, epoch_head_states
     if "swa_lora" in locals():
@@ -4170,7 +4195,7 @@ def compute_hierarchical_tree_probs(
     p_deb: np.ndarray = None,
     p_qwen: np.ndarray = None,
     p_bge: np.ndarray = None,
-    router_weights=(0.30, 0.25, 0.30, 0.15),
+    router_weights=None,
     expert_weights=(1.0, 1.0, 1.0, 1.0),
     hierarchy_alpha: float = 0.65,
 ) -> np.ndarray:
@@ -4179,15 +4204,24 @@ def compute_hierarchical_tree_probs(
       P(Class_i) = P_router(Family_k) * P_expert(Class_i | Family_k)
     Stage 1 Router (router_weights) isolates coarse macro-family regions (>92% family accuracy).
     Stage 2 Sibling Expert (expert_weights) isolates conditional probabilities strictly within family siblings.
+    When router_weights is None, Stage 1 weights dynamically couple with expert_weights to prevent down-weighted streams from biasing routing.
     Smooth interpolation with flat expert distribution via hierarchy_alpha prevents hard-decision cliffs.
     """
     models = [p_svm, p_deb, p_qwen, p_bge]
-    w_r = [w if m is not None else 0.0 for w, m in zip(router_weights, models)]
+    base_rw = (0.30, 0.25, 0.30, 0.15)
     w_e = [w if m is not None else 0.0 for w, m in zip(expert_weights, models)]
-    sum_r = max(sum(w_r), 1e-6)
     sum_e = max(sum(w_e), 1e-6)
-    w_r = [w / sum_r for w in w_r]
     w_e = [w / sum_e for w in w_e]
+
+    if router_weights is None:
+        r_base = [w if m is not None else 0.0 for w, m in zip(base_rw, models)]
+        sum_rb = max(sum(r_base), 1e-6)
+        r_base = [w / sum_rb for w in r_base]
+        w_r = [0.5 * rb + 0.5 * we for rb, we in zip(r_base, w_e)]
+    else:
+        w_r = [w if m is not None else 0.0 for w, m in zip(router_weights, models)]
+        sum_r = max(sum(w_r), 1e-6)
+        w_r = [w / sum_r for w in w_r]
 
     ref_m = next((m for m in models if m is not None), None)
     if ref_m is None:
@@ -4233,7 +4267,7 @@ def quad_rank_blend(
     balance_test: bool = False,
     apply_family_gating: bool = True,
     family_alpha: float = 0.65,
-    router_weights=(0.30, 0.25, 0.30, 0.15),
+    router_weights=None,
     return_probs: bool = False,
 ):
     """
@@ -4305,18 +4339,18 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     q_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5] if qwn_p is not None else [0.0]
     b_cands = [0.0, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0] if bge_p is not None else [0.0]
 
-    # Precompute invariant Stage 1 Router family probabilities across the entire grid search
-    r_weights = (0.30, 0.25, 0.30, 0.15)
+    # Precompute invariant base Stage 1 Router probabilities
+    base_rw = (0.30, 0.25, 0.30, 0.15)
     r_models = [svm_p, deb_p, qwn_p, bge_p]
     ref_p = next(m for m in r_models if m is not None)
-    w_r_eff = [w if m is not None else 0.0 for w, m in zip(r_weights, r_models)]
+    w_r_eff = [w if m is not None else 0.0 for w, m in zip(base_rw, r_models)]
     sum_r = max(sum(w_r_eff), 1e-6)
-    p_router = np.zeros_like(ref_p)
+    p_base_router = np.zeros_like(ref_p)
     for m, wr in zip(r_models, w_r_eff):
         if m is not None:
-            p_router += (wr / sum_r) * m
-    p_router /= np.maximum(p_router.sum(axis=-1, keepdims=True), 1e-12)
-    p_family_dict = {fam: np.sum(p_router[:, idxs], axis=-1, keepdims=True) for fam, idxs in FAMILY_TO_INDICES.items()}
+            p_base_router += (wr / sum_r) * m
+    p_base_router /= np.maximum(p_base_router.sum(axis=-1, keepdims=True), 1e-12)
+    p_base_family_dict = {fam: np.sum(p_base_router[:, idxs], axis=-1, keepdims=True) for fam, idxs in FAMILY_TO_INDICES.items()}
     N_val, K_cls = ref_p.shape
     do_sinkhorn = N_val >= 36
 
@@ -4335,8 +4369,8 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     blend_p = np.empty_like(ref_p)
     target_col = np.full(K_cls, N_val / K_cls, dtype=np.float64)
     ones_N = np.ones(N_val, dtype=np.float64)
-    multi_fams = [(idxs, p_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) > 1]
-    single_fams = [(idxs, p_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) == 1]
+    multi_fams = [(idxs, p_base_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) > 1]
+    single_fams = [(idxs, p_base_family_dict[fam]) for fam, idxs in FAMILY_TO_INDICES.items() if len(idxs) == 1]
 
     for ws in s_cands:
         for wd in d_cands:
@@ -4355,11 +4389,14 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
                     np.maximum(row_s, 1e-12, out=row_s)
                     p_expert /= row_s
 
-                    for idxs, p_fam in multi_fams:
+                    for idxs, p_base_fam in multi_fams:
                         sub = p_expert[:, idxs]
                         sub_mass = np.maximum(sub.sum(axis=-1, keepdims=True), 1e-12)
+                        p_fam = 0.5 * p_base_fam + 0.5 * sub_mass
                         p_hier[:, idxs] = p_fam * (sub / sub_mass)
-                    for idxs, p_fam in single_fams:
+                    for idxs, p_base_fam in single_fams:
+                        sub = p_expert[:, idxs]
+                        p_fam = 0.5 * p_base_fam + 0.5 * sub
                         p_hier[:, idxs] = p_fam
 
                     np.multiply(p_hier, 0.65, out=blend_p)
@@ -4395,7 +4432,7 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
     for cand_alpha in [0.0, 0.20, 0.35, 0.50, 0.65, 0.75, 0.85]:
         tree_p = compute_hierarchical_tree_probs(
             p_svm=svm_p, p_deb=deb_p, p_qwen=qwn_p, p_bge=bge_p,
-            router_weights=r_weights,
+            router_weights=None,
             expert_weights=best_w,
             hierarchy_alpha=cand_alpha,
         )
@@ -4551,6 +4588,8 @@ class TransductivePromptCenterer:
                 return logits
             z_centered = logits.copy()
             z_centered[valid_rows] -= np.mean(logits[valid_rows], axis=1, keepdims=True)
+            if np.sum(valid_rows) >= 18:
+                z_centered[valid_rows] -= np.mean(z_centered[valid_rows], axis=0, keepdims=True)
             global_std = np.maximum(np.std(z_centered[valid_rows], axis=0, keepdims=True), 1e-4)
             out = z_centered.copy()
 

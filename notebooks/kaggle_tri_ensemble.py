@@ -718,8 +718,9 @@ def make_prompt_sibling_paired_indices(
     mega_factor: int = 8,
 ) -> np.ndarray:
     """
-    Constructs epoch batch indices that co-locate responses to the SAME prompt in the same micro-batch,
-    enabling in-batch sibling contrastive separation while sorting by length to minimize padding.
+    Co-locates 2-4 sibling responses to the SAME prompt of similar length in the same micro-batch,
+    then sorts those sibling packets by mean length across the mega-chunk.
+    Guarantees high in-batch sibling pair density AND minimal padding waste!
     """
     n_samples = len(group_ids)
     if n_samples <= batch_size:
@@ -730,24 +731,30 @@ def make_prompt_sibling_paired_indices(
     for idx, gid in enumerate(group_ids):
         group_to_idx[gid].append(idx)
 
-    unique_groups = list(group_to_idx.keys())
-    rng.shuffle(unique_groups)
+    # Break each prompt group into length-adjacent sibling packets of size 2..4
+    packets = []
+    packet_lens = []
+    pkt_size = max(2, min(4, batch_size // 2))
+    for gid, idxs in group_to_idx.items():
+        idxs_arr = np.array(idxs, dtype=np.int64)
+        # Sort within the same prompt by length so paired siblings have nearly identical lengths!
+        idxs_sorted = idxs_arr[np.argsort(lengths[idxs_arr])]
+        for start in range(0, len(idxs_sorted), pkt_size):
+            pkt = idxs_sorted[start:start + pkt_size]
+            packets.append(pkt)
+            packet_lens.append(float(np.mean(lengths[pkt])))
 
-    mega_size = batch_size * mega_factor
-    mega_chunks = []
-    current_chunk = []
-    for gid in unique_groups:
-        current_chunk.extend(group_to_idx[gid])
-        if len(current_chunk) >= mega_size:
-            mega_chunks.append(np.array(current_chunk, dtype=np.int64))
-            current_chunk = []
-    if current_chunk:
-        mega_chunks.append(np.array(current_chunk, dtype=np.int64))
+    n_pkts = len(packets)
+    perm = rng.permutation(n_pkts)
+    mega_pkts = max(batch_size * mega_factor // pkt_size, 4)
 
     sorted_epoch_indices = []
-    for chunk in mega_chunks:
-        chunk_lens = lengths[chunk]
-        sorted_epoch_indices.extend(chunk[np.argsort(chunk_lens)])
+    for m_start in range(0, n_pkts, mega_pkts):
+        m_slice = perm[m_start:m_start + mega_pkts]
+        # Sort sibling packets by their mean length to minimize padding across the micro-batch
+        m_sorted = m_slice[np.argsort([packet_lens[i] for i in m_slice])]
+        for p_idx in m_sorted:
+            sorted_epoch_indices.extend(packets[p_idx].tolist())
 
     return np.array(sorted_epoch_indices, dtype=np.int64)
 
@@ -2130,7 +2137,7 @@ class FocalLoss(nn.Module):
             loss = loss * w
         if sample_weights is not None:
             sw = sample_weights.to(device=logits.device, dtype=loss.dtype)
-            return (loss * sw).sum() / sw.sum().clamp(min=1e-6)
+            return (loss * sw).mean()
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
@@ -2782,7 +2789,7 @@ def _train_transformer_fold_impl(
     optimizer = AdamW(opt_params, foreach=cuda_ok)
 
     has_ext = cached_enc_ext is not None and ext_y_int is not None
-    n_ext_per_ep = (len(labels) * 40) if has_ext else 0
+    n_ext_per_ep = (len(labels) * 25) if has_ext else 0
     total_steps = max(sum(
         ((len(texts_tr) + (n_ext_per_ep if ep < epochs - 1 else 0) + batch_size * grad_accum - 1) // (batch_size * grad_accum))
         for ep in range(epochs)
@@ -2791,7 +2798,7 @@ def _train_transformer_fold_impl(
         optimizer,
         num_warmup_steps=max(int(0.1 * total_steps), 1),
         num_training_steps=total_steps,
-        min_lr_ratio=0.10,
+        min_lr_ratio=0.05,
     )
 
     if cached_enc_tr is not None:
@@ -2841,7 +2848,7 @@ def _train_transformer_fold_impl(
         if has_ext and epoch < epochs - 1:
             slice_enc, slice_y, slice_groups = sample_epoch_neural_external_slice(
                 cached_enc_ext, ext_y_int, group_ids_ext,
-                num_classes=len(labels), per_class_k=40, seed=42 + epoch * 13
+                num_classes=len(labels), per_class_k=25, seed=42 + epoch * 13
             )
             curr_enc = {k: enc_tr[k] + slice_enc[k] for k in enc_tr}
             curr_y = np.concatenate([y_tr_int, slice_y])
@@ -2918,7 +2925,7 @@ def _train_transformer_fold_impl(
                         raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
                         if batch_weights is not None:
                             bw = batch_weights.to(device=raw_aux.device, dtype=raw_aux.dtype)
-                            aux_loss = (raw_aux * bw).sum() / bw.sum().clamp(min=1e-6)
+                            aux_loss = (raw_aux * bw).mean()
                         else:
                             aux_loss = raw_aux.mean()
                         loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
@@ -3441,7 +3448,7 @@ def _train_qwen_lora_fold_impl(
     label_to_fam_tensor = torch.tensor(LABEL_TO_FAMILY_IDX, dtype=torch.long, device=head_dev)
 
     has_ext = cached_enc_ext is not None and ext_y_int is not None
-    n_ext_per_ep = (len(labels) * 40) if has_ext else 0
+    n_ext_per_ep = (len(labels) * 25) if has_ext else 0
     total_steps = max(sum(
         ((len(texts_tr) + (n_ext_per_ep if ep < epochs - 1 else 0) + batch_size * grad_accum - 1) // (batch_size * grad_accum))
         for ep in range(epochs)
@@ -3450,7 +3457,7 @@ def _train_qwen_lora_fold_impl(
         optimizer,
         num_warmup_steps=max(int(0.1 * total_steps), 1),
         num_training_steps=total_steps,
-        min_lr_ratio=0.10,
+        min_lr_ratio=0.05,
     )
 
     if cached_enc_tr is not None:
@@ -3489,7 +3496,7 @@ def _train_qwen_lora_fold_impl(
         if has_ext and epoch < epochs - 1:
             slice_enc, slice_y, slice_groups = sample_epoch_neural_external_slice(
                 cached_enc_ext, ext_y_int, group_ids_ext,
-                num_classes=len(labels), per_class_k=40, seed=42 + epoch * 17
+                num_classes=len(labels), per_class_k=25, seed=42 + epoch * 17
             )
             curr_enc = {k: enc_tr[k] + slice_enc[k] for k in enc_tr}
             curr_y = np.concatenate([y_tr_int, slice_y])
@@ -3570,7 +3577,7 @@ def _train_qwen_lora_fold_impl(
                         raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
                         if batch_weights is not None:
                             bw = batch_weights.to(device=raw_aux.device, dtype=raw_aux.dtype)
-                            aux_loss = (raw_aux * bw).sum() / bw.sum().clamp(min=1e-6)
+                            aux_loss = (raw_aux * bw).mean()
                         else:
                             aux_loss = raw_aux.mean()
                         loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
@@ -4867,11 +4874,11 @@ def run_quad_ensemble():
     is_qwen3 = qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower())
     N_EPOCHS_DEB = 4
     N_EPOCHS_BGE = 4
-    N_EPOCHS_QWEN = 3
+    N_EPOCHS_QWEN = 2 if is_qwen3 else 3
     MAX_WALLCLOCK_HOURS = 8.2
-    SAFETY_MARGIN_SEC = 1200  # 20 min buffer for final bagging, Sinkhorn, and submission
+    SAFETY_MARGIN_SEC = 600  # 10 min buffer for final bagging, Sinkhorn, and submission
     pipeline_t0 = SCRIPT_T0
-    est_inference_sec = 900.0  # 15 min reserve for final inference, calibration and blending
+    est_inference_sec = 300.0  # 5 min reserve for final inference, calibration and blending
     pipeline_deadline = SCRIPT_T0 + (MAX_WALLCLOCK_HOURS * 3600) - SAFETY_MARGIN_SEC - est_inference_sec
     model_durations = {"deb": [], "bge": [], "qwen": []}
 
@@ -4879,7 +4886,7 @@ def run_quad_ensemble():
         seed_everything(42 + fold)
         fold_start = time.perf_counter()
         elapsed_hours = (time.perf_counter() - pipeline_t0) / 3600.0
-        if elapsed_hours > (MAX_WALLCLOCK_HOURS - 1.2):
+        if elapsed_hours > (MAX_WALLCLOCK_HOURS - 1.0):
             print(f"\n[Time Guard] {elapsed_hours:.2f}h elapsed. Starting another fold would risk the 9h limit.", flush=True)
             print(f"[Time Guard] Gracefully stopping at {fold} completed folds to finalize ensemble.", flush=True)
             break

@@ -4735,8 +4735,9 @@ def run_quad_ensemble():
         # Slice precomputed token caches from RAM in 0.001s (merging external caches when active)
         deb_cache = token_caches.get("deberta")
         deb_kw = {}
+        use_deb_ext = deb_cache is not None and deb_cache.get("ext") is not None and ext_sample_idx is not None
         if deb_cache is not None:
-            if deb_cache.get("ext") is not None and ext_sample_idx is not None:
+            if use_deb_ext:
                 deb_kw["cached_enc_tr"] = {
                     k: [deb_cache["tr"][k][i] for i in tr_idx] + [deb_cache["ext"][k][i] for i in ext_sample_idx]
                     for k in deb_cache["tr"]
@@ -4747,11 +4748,15 @@ def run_quad_ensemble():
             deb_kw["cached_enc_te"] = deb_cache["te"]
             deb_kw["cached_enc_te_tta"] = deb_cache.get("te_tta")
             deb_kw["cached_tokenizer"] = deb_cache["tokenizer"]
+        deb_tr_texts = texts_tr_deb if use_deb_ext else texts_tr
+        deb_tr_y = y_tr_deb if use_deb_ext else y_tr_str
+        deb_tr_groups = group_ids_tr_deb if use_deb_ext else group_ids[tr_idx]
 
         bge_cache = token_caches.get("bge")
         bge_kw = {}
+        use_bge_ext = bge_cache is not None and bge_cache.get("ext") is not None and ext_sample_idx is not None
         if bge_cache is not None:
-            if bge_cache.get("ext") is not None and ext_sample_idx is not None:
+            if use_bge_ext:
                 bge_kw["cached_enc_tr"] = {
                     k: [bge_cache["tr"][k][i] for i in tr_idx] + [bge_cache["ext"][k][i] for i in ext_sample_idx]
                     for k in bge_cache["tr"]
@@ -4762,11 +4767,15 @@ def run_quad_ensemble():
             bge_kw["cached_enc_te"] = bge_cache["te"]
             bge_kw["cached_enc_te_tta"] = bge_cache.get("te_tta")
             bge_kw["cached_tokenizer"] = bge_cache["tokenizer"]
+        bge_tr_texts = texts_tr_bge if use_bge_ext else texts_tr
+        bge_tr_y = y_tr_bge if use_bge_ext else y_tr_str
+        bge_tr_groups = group_ids_tr_bge if use_bge_ext else group_ids[tr_idx]
 
         qwen_cache = token_caches.get("qwen")
         qwen_kw = {}
+        use_qwen_ext = qwen_cache is not None and qwen_cache.get("ext") is not None and ext_sample_idx_qwen is not None
         if qwen_cache is not None:
-            if qwen_cache.get("ext") is not None and ext_sample_idx_qwen is not None:
+            if use_qwen_ext:
                 qwen_kw["cached_enc_tr"] = {
                     k: [qwen_cache["tr"][k][i] for i in tr_idx] + [qwen_cache["ext"][k][i] for i in ext_sample_idx_qwen]
                     for k in qwen_cache["tr"]
@@ -4777,6 +4786,9 @@ def run_quad_ensemble():
             qwen_kw["cached_enc_te"] = qwen_cache["te"]
             qwen_kw["cached_enc_te_tta"] = qwen_cache.get("te_tta")
             qwen_kw["cached_tokenizer"] = qwen_cache["tokenizer"]
+        qwen_tr_texts = texts_tr_qwen if use_qwen_ext else texts_tr
+        qwen_tr_y = y_tr_qwen if use_qwen_ext else y_tr_str
+        qwen_tr_groups = group_ids_tr_qwen if use_qwen_ext else group_ids[tr_idx]
 
         # Sequential Fine-Tuning: DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)
         deb_expected = np.mean(model_durations["deb"]) * 1.15 if model_durations["deb"] else 1150.0
@@ -4789,13 +4801,13 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_deb, test_deb = train_deberta_fold(
-                    texts_tr_deb, y_tr_deb, texts_va, y_va_str, texts_test,
+                    deb_tr_texts, deb_tr_y, texts_va, y_va_str, texts_test,
                     deberta_dir, LABELS,
                     device=deb_dev,
                     batch_size=16, grad_accum=1, max_length=448,
                     epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids_tr_deb,
+                    group_ids_tr=deb_tr_groups,
                     **deb_kw,
                 )
                 if val_deb is not None and np.all(np.isfinite(val_deb)):
@@ -4825,13 +4837,13 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_bge, test_bge = train_bge_fold(
-                    texts_tr_bge, y_tr_bge, texts_va, y_va_str, texts_test,
+                    bge_tr_texts, bge_tr_y, texts_va, y_va_str, texts_test,
                     bge_dir, LABELS,
                     device=bge_dev,
                     batch_size=20, grad_accum=1, max_length=448,
                     epochs=N_EPOCHS_BGE, lr_backbone=9.5e-6, lr_head=1.2e-4, layer_decay=0.70, n_frozen_bottom_layers=8, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids_tr_bge,
+                    group_ids_tr=bge_tr_groups,
                     **bge_kw,
                 )
                 if val_bge is not None and np.all(np.isfinite(val_bge)):
@@ -4867,12 +4879,12 @@ def run_quad_ensemble():
                 m_t0 = time.perf_counter()
                 retain_qwen = False
                 val_qwen, test_qwen = train_qwen_lora_fold(
-                    texts_tr_qwen, y_tr_qwen, texts_va, y_va_str, texts_test,
+                    qwen_tr_texts, qwen_tr_y, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
                     batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=N_EPOCHS_QWEN,
                     lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=48, lora_alpha=96, lora_dropout=0.08,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids_tr_qwen,
+                    group_ids_tr=qwen_tr_groups,
                     retain_backbone=retain_qwen,
                     **qwen_kw,
                 )

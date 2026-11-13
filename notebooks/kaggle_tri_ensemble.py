@@ -1181,7 +1181,7 @@ class DenseStylometricClassifier(BaseEstimator):
         self.scaler_ = StandardScaler()
         cw = None if sample_weight is not None else self.class_weight
         self.clf_ = LogisticRegression(
-            C=self.c, max_iter=1000, random_state=self.seed, class_weight=cw, solver="lbfgs"
+            C=self.c, max_iter=300, random_state=self.seed, class_weight=cw, solver="lbfgs"
         )
         if self.use_kernel_expander:
             self.expander_ = NonLinearStylometricKernelExpander(seed=self.seed)
@@ -1236,7 +1236,7 @@ class DualLinearClassifier(BaseEstimator):
     def fit(self, X, y, sample_weight=None):
         cw = None if sample_weight is not None else self.class_weight
         self.svc_1_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 0.75, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
-        self.svc_2_ = LinearSVC(penalty="l1", loss="squared_hinge", dual=False, C=self.c_svc * 1.0, class_weight=cw, tol=1e-2, max_iter=500, random_state=self.seed + 7)
+        self.svc_2_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 1.50, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
         self.ridge_1_ = RidgeClassifier(alpha=self.alpha_ridge * 0.6, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed)
         self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed + 7)
 
@@ -4784,7 +4784,7 @@ def run_quad_ensemble():
             try:
                 print(f"\n[Fold {fold+1}] {qwen_desc} LoRA fine-tune (device_map=auto, r=48, BS={qwen_bs}, GA={qwen_ga}, epochs={N_EPOCHS_QWEN}, L=448)", flush=True)
                 m_t0 = time.perf_counter()
-                retain_qwen = (fold < n_splits - 1)
+                retain_qwen = False
                 val_qwen, test_qwen = train_qwen_lora_fold(
                     texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
@@ -4901,9 +4901,10 @@ def run_quad_ensemble():
                 svm_bal_acc = balanced_accuracy_score(y_va_str, [LABELS[i] for i in np.argmax(val_svm_m, axis=1)])
                 print(f"  [CPU Linear] Fold {fold+1} bal_acc={svm_bal_acc*100:.2f}% (PromptDF min3 + Sibling Specialists active)", flush=True)
 
-                del cpu_clf, dense_clf, clique_specialist, subspace_proj
+                del cpu_clf, dense_clf, clique_specialist, subspace_proj, X_tr_fold, X_va_fold, X_te_fold, pdf_mask, keep_cols
                 if X_ext_all is not None:
                     del X_ext_fold, X_tr_comb, V_dense_tr_comb, V_dense_ext_aligned, comb_V_fold
+                gc.collect()
         except Exception as e:
             import traceback
             print(f"  [CPU Linear] Fold {fold+1} error: {e}", flush=True)

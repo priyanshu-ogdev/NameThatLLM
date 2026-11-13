@@ -1328,7 +1328,9 @@ class DenseStylometricClassifier(BaseEstimator):
         else:
             self.expander_ = None
             V_feat = V
-        V_scaled = self.scaler_.fit_transform(V_feat)
+        fit_slice = slice(0, 2500) if V_feat.shape[0] > 2500 else slice(None)
+        self.scaler_.fit(V_feat[fit_slice])
+        V_scaled = np.clip(self.scaler_.transform(V_feat), -8.0, 8.0)
         if sample_weight is not None:
             self.clf_.fit(V_scaled, y, sample_weight=sample_weight)
         else:
@@ -1347,7 +1349,7 @@ class DenseStylometricClassifier(BaseEstimator):
             V_feat = self.expander_.transform(V)
         else:
             V_feat = V
-        V_scaled = self.scaler_.transform(V_feat)
+        V_scaled = np.clip(self.scaler_.transform(V_feat), -8.0, 8.0)
         p = self.clf_.predict_proba(V_scaled)
         if self.canonical_labels is not None:
             p_aligned = align_margins(p, self._raw_classes, self.canonical_labels, fill_value=0.0)
@@ -4600,8 +4602,9 @@ class TransductivePromptCenterer:
             z_centered[valid_rows] -= np.mean(logits[valid_rows], axis=1, keepdims=True)
             if np.sum(valid_rows) >= 18:
                 z_centered[valid_rows] -= np.mean(z_centered[valid_rows], axis=0, keepdims=True)
+
             global_std = np.maximum(np.std(z_centered[valid_rows], axis=0, keepdims=True), 1e-4)
-            out = z_centered.copy()
+            out = logits.copy()
 
             if getattr(self, "_nbr_idx_mat", None) is not None and np.all(valid_rows):
                 active = self._has_nbrs

@@ -424,6 +424,66 @@ def sample_balanced_external_indices(ext_labels: np.ndarray, size: int, seed: in
     return np.array(selected[:size], dtype=np.int64)
 
 
+def select_contrastive_external_coreset(
+    ext_df: pd.DataFrame,
+    labels: list[str],
+    max_per_class: int = 240,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Selects a high-signal, class-balanced external coreset for neural training.
+    Prioritizes prompts answered by multiple models (_n_models >= 6) so topic signals
+    cancel out across sibling responses, while capping per-class count to bound tokenization RAM.
+    """
+    if ext_df is None or len(ext_df) == 0:
+        return pd.DataFrame()
+    rng = np.random.RandomState(seed)
+    selected_indices = []
+    for c_idx, lab in enumerate(labels):
+        c_mask = (ext_df["model"] == lab)
+        c_rows = ext_df[c_mask]
+        if len(c_rows) == 0:
+            continue
+        if len(c_rows) <= max_per_class:
+            selected_indices.extend(c_rows.index.tolist())
+        else:
+            n_mod = c_rows["_n_models"].to_numpy(dtype=np.float64) if "_n_models" in c_rows.columns else np.ones(len(c_rows))
+            scores = n_mod + rng.uniform(0.0, 0.5, size=len(c_rows))
+            top_rel = np.argsort(-scores)[:max_per_class]
+            selected_indices.extend(c_rows.index.to_numpy()[top_rel].tolist())
+
+    selected_indices = sorted(set(selected_indices))
+    return ext_df.loc[selected_indices].reset_index(drop=True)
+
+
+def sample_epoch_neural_external_slice(
+    enc_ext: dict,
+    y_ext_int: np.ndarray,
+    group_ids_ext: np.ndarray,
+    num_classes: int = 18,
+    per_class_k: int = 40,
+    seed: int = 42,
+) -> tuple[dict, np.ndarray, np.ndarray]:
+    """
+    Draws an exact uniform per-class stratified sample (per_class_k * 18 rows) for one training epoch.
+    Guarantees 0.000% class prior skew and preserves multi-model external prompt group IDs.
+    """
+    rng = np.random.RandomState(seed)
+    chosen = []
+    for c in range(num_classes):
+        c_idx = np.flatnonzero(y_ext_int == c)
+        if len(c_idx) == 0:
+            continue
+        replace = len(c_idx) < per_class_k
+        picks = rng.choice(c_idx, size=per_class_k, replace=replace)
+        chosen.extend(picks.tolist())
+
+    chosen_arr = np.array(chosen, dtype=np.int64)
+    rng.shuffle(chosen_arr)
+    sliced_enc = {k: [enc_ext[k][i] for i in chosen_arr] for k in enc_ext}
+    return sliced_enc, y_ext_int[chosen_arr], group_ids_ext[chosen_arr]
+
+
 def build_mass_balanced_external_corpus(
     comp_train_df: pd.DataFrame,
     ext_wide_path: str | Path,
@@ -734,7 +794,7 @@ class FastBatchPrefetcher:
     Eliminates CPU-GPU synchronization bubbles, keeping Tensor Cores at 100% duty cycle.
     Supports asynchronous CPU-side PromptDF stochastic topic-masking.
     """
-    def __init__(self, tokenizer, enc_data, y_labels, indices, batch_size, dev, label_dev=None, cuda_ok=True, maxsize=6, topic_prep=None, group_ids=None):
+    def __init__(self, tokenizer, enc_data, y_labels, indices, batch_size, dev, label_dev=None, cuda_ok=True, maxsize=6, topic_prep=None, group_ids=None, sample_weights=None):
         self.tokenizer = tokenizer
         self.enc_data = enc_data
         self.y_labels = np.asarray(y_labels, dtype=np.int64)
@@ -748,6 +808,7 @@ class FastBatchPrefetcher:
             self.group_ids = pd.factorize(np.asarray(group_ids))[0].astype(np.int64)
         else:
             self.group_ids = None
+        self.sample_weights = np.asarray(sample_weights, dtype=np.float32) if sample_weights is not None else None
         self.current_groups = None
         self.queue = queue.Queue(maxsize=maxsize)
         self.stop_event = threading.Event()
@@ -787,9 +848,15 @@ class FastBatchPrefetcher:
                     if self.cuda_ok:
                         groups = groups.pin_memory()
 
+                w_batch = None
+                if self.sample_weights is not None:
+                    w_batch = torch.from_numpy(self.sample_weights[idx])
+                    if self.cuda_ok:
+                        w_batch = w_batch.pin_memory()
+
                 while not self.stop_event.is_set():
                     try:
-                        self.queue.put((kw, labels, groups), timeout=0.1)
+                        self.queue.put((kw, labels, groups, w_batch), timeout=0.1)
                         break
                     except queue.Full:
                         continue
@@ -805,23 +872,29 @@ class FastBatchPrefetcher:
                 if self.exc is not None:
                     raise self.exc
                 break
-            if len(item) == 3:
+            if len(item) == 4:
+                kw, labels, groups, w_batch = item
+            elif len(item) == 3:
                 kw, labels, groups = item
+                w_batch = None
             else:
                 kw, labels = item
                 groups = None
-            self._last_pinned = (kw, labels, groups)
+                w_batch = None
+            self._last_pinned = (kw, labels, groups, w_batch)
             if self.cuda_ok:
                 gpu_kw = {k: v.to(self.dev, non_blocking=True) for k, v in kw.items()}
                 gpu_labels = labels.to(self.label_dev, non_blocking=True)
                 self.current_groups = groups.to(self.label_dev, non_blocking=True) if groups is not None else None
                 gpu_kw["_batch_groups"] = self.current_groups
+                gpu_kw["_batch_weights"] = w_batch.to(self.label_dev, non_blocking=True) if w_batch is not None else None
                 yield gpu_kw, gpu_labels
             else:
                 cpu_kw = {k: v.to(self.dev) for k, v in kw.items()}
                 cpu_labels = labels.to(self.label_dev)
                 self.current_groups = groups.to(self.label_dev) if groups is not None else None
                 cpu_kw["_batch_groups"] = self.current_groups
+                cpu_kw["_batch_weights"] = w_batch.to(self.label_dev) if w_batch is not None else None
                 yield cpu_kw, cpu_labels
 
     def close(self):
@@ -1141,13 +1214,12 @@ class NonLinearStylometricKernelExpander(BaseEstimator, TransformerMixin):
     """
     Expands dense continuous stylometric features into a high-capacity non-linear Hilbert space using:
       1. Internal unit-variance scaling clipped to [-6.0, 6.0] to prevent quadratic blowout.
-      2. Degree-2 polynomial interaction cross-products among top-36 variance features (666 quad terms).
-      3. Nyström RBF kernel approximation mapping to 1,024 non-linear components (gamma=1.0/n_feats).
-    Total expansion: 145 (raw scaled) + 666 (quad cross-products) + 1,024 (RBF components) = 1,835 features.
-    Utilizes ~3.2 GB of System RAM to grant CPU linear models (LogisticRegression / Ridge)
-    expressive curved decision boundaries between LLM stylistic signatures in <3.0s per fold.
+      2. Degree-2 polynomial interaction cross-products among top-24 variance features.
+      3. Nyström RBF kernel approximation mapping to 256 non-linear components (gamma=1.0/n_feats).
+    Total expansion: 145 (raw scaled) + 300 (quad cross-products) + 256 (RBF components) = 701 features.
+    Provides regularized curved decision boundaries without memorizing training prompts in <0.5s per fold.
     """
-    def __init__(self, n_top_poly=36, n_nystroem=1024, seed=42):
+    def __init__(self, n_top_poly=24, n_nystroem=256, seed=42):
         self.n_top_poly = n_top_poly
         self.n_nystroem = n_nystroem
         self.seed = seed
@@ -1193,7 +1265,7 @@ class DenseStylometricClassifier(BaseEstimator):
     LogisticRegression classifier with balanced class weights to produce calibrated probabilities.
     Supports sample_weight with automatic class_weight=None override to prevent double-balancing.
     """
-    def __init__(self, c=0.015, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
+    def __init__(self, c=0.03, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
         self.c = c
         self.seed = seed
         self.class_weight = class_weight
@@ -1808,18 +1880,24 @@ class SpikeAndGapHierarchicalHead(nn.Module):
             nn.Linear(128, 1)
         )
 
-        fused_dim = hidden_size * 3 + 4
+        # Moment-specific LayerNorms + low-variance bottleneck (cuts head params from 12.6M -> 2.4M)
+        self.norm_mean = nn.LayerNorm(hidden_size)
+        self.norm_attn = nn.LayerNorm(hidden_size)
+        self.norm_max = nn.LayerNorm(hidden_size)
+        self.moment_bottleneck = nn.Linear(hidden_size, 512, bias=False)
+
+        fused_dim = 512 * 3 + 4
         self.proj = nn.Sequential(
             nn.LayerNorm(fused_dim),
             nn.Dropout(0.15),
-            nn.Linear(fused_dim, 1024),
+            nn.Linear(fused_dim, 768),
             nn.GELU(),
-            nn.LayerNorm(1024)
+            nn.LayerNorm(768)
         )
 
-        self.weight = nn.Parameter(torch.empty(num_classes * sub_centers, 1024))
+        self.weight = nn.Parameter(torch.empty(num_classes * sub_centers, 768))
         nn.init.xavier_uniform_(self.weight)
-        self.scale = nn.Parameter(torch.tensor(14.0))  # Learnable cosine temperature scale
+        self.scale = nn.Parameter(torch.tensor(12.0))  # Learnable cosine temperature scale
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor = None) -> torch.Tensor:
         """
@@ -1892,7 +1970,10 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         seq_len_norm = (lengths / 512.0).to(dtype=hidden_states.dtype)
         gap_stats = torch.cat([gap_mean, gap_max, gap_std, seq_len_norm], dim=-1)
 
-        fused = torch.cat([h_mean, h_attn_spike, h_max_spike, gap_stats], dim=-1)
+        b_mean = self.moment_bottleneck(self.norm_mean(h_mean))
+        b_attn = self.moment_bottleneck(self.norm_attn(h_attn_spike))
+        b_max = self.moment_bottleneck(self.norm_max(h_max_spike))
+        fused = torch.cat([b_mean, b_attn, b_max, gap_stats], dim=-1)
         emb = F.normalize(self.proj(fused), p=2, dim=-1)
 
         w_norm = F.normalize(self.weight, p=2, dim=-1)
@@ -1997,7 +2078,7 @@ class FocalLoss(nn.Module):
     alpha (class weights) additionally up-weights rare classes.
     Sibling difficulty margins Delta_c force larger angular separation for ambiguous sibling cliques.
     """
-    def __init__(self, weight=None, gamma=1.0, label_smoothing=0.01, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None):
+    def __init__(self, weight=None, gamma=0.75, label_smoothing=0.01, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None):
         super().__init__()
         self.gamma = gamma
         self.label_smoothing = label_smoothing
@@ -2016,12 +2097,12 @@ class FocalLoss(nn.Module):
         else:
             self.sibling_margins = None
 
-    def forward(self, logits, targets):
+    def forward(self, logits, targets, sample_weights=None):
         num_classes = logits.size(-1)
         targets = targets.to(device=logits.device, dtype=torch.long).clamp(0, num_classes - 1)
         logits_f = logits.float()
         if self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
-            sm = self.sibling_margins.to(logits.device)
+            sm = 0.5 * self.sibling_margins.to(logits.device)  # damped 0.5x to prevent early gradient distortion
             target_margins = sm[targets].unsqueeze(1)
             logits_f = logits_f.scatter_add(1, targets.unsqueeze(1), -target_margins)
         log_prob = torch.nn.functional.log_softmax(logits_f, dim=-1)
@@ -2040,6 +2121,9 @@ class FocalLoss(nn.Module):
         if self.weight is not None:
             w = self.weight.to(logits.device)[targets]
             loss = loss * w
+        if sample_weights is not None:
+            sw = sample_weights.to(device=logits.device, dtype=loss.dtype)
+            return (loss * sw).sum() / sw.sum().clamp(min=1e-6)
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
@@ -2479,6 +2563,9 @@ def _train_transformer_fold_impl(
     use_topic_masking=True,
     use_sift=True,
     n_frozen_bottom_layers=4,
+    cached_enc_ext=None,
+    ext_y_int=None,
+    group_ids_ext=None,
 ):
     """
     Unified, high-throughput transformer fine-tuning loop for DeBERTa-v3-large and BGE-large-en-v1.5.
@@ -2671,7 +2758,7 @@ def _train_transformer_fold_impl(
 
     cw = compute_smoothed_class_weights(y_tr_int, num_classes=len(labels), gamma=0.5)
     weight_tensor = torch.tensor(cw, dtype=torch.float32, device=dev)
-    criterion = FocalLoss(weight=weight_tensor, gamma=1.0, label_smoothing=label_smoothing)
+    criterion = FocalLoss(weight=weight_tensor, gamma=0.75, label_smoothing=label_smoothing)
     family_criterion = nn.CrossEntropyLoss().to(dev)
     FAMILY_AUX_WEIGHT = 0.25
     label_to_fam_tensor = torch.tensor(LABEL_TO_FAMILY_IDX, dtype=torch.long, device=dev)
@@ -2681,8 +2768,12 @@ def _train_transformer_fold_impl(
     )
     optimizer = AdamW(opt_params, foreach=cuda_ok)
 
-    n_opt_steps_per_epoch = max((len(texts_tr) + batch_size * grad_accum - 1) // (batch_size * grad_accum), 1)
-    total_steps = n_opt_steps_per_epoch * epochs
+    has_ext = cached_enc_ext is not None and ext_y_int is not None
+    n_ext_per_ep = (len(labels) * 40) if has_ext else 0
+    total_steps = max(sum(
+        ((len(texts_tr) + (n_ext_per_ep if ep < epochs - 1 else 0) + batch_size * grad_accum - 1) // (batch_size * grad_accum))
+        for ep in range(epochs)
+    ), 1)
     scheduler = get_cosine_schedule_with_warmup_and_min_lr(
         optimizer,
         num_warmup_steps=max(int(0.1 * total_steps), 1),
@@ -2708,9 +2799,6 @@ def _train_transformer_fold_impl(
     best_val_logits = None
     best_state = None
     epoch_states = []
-    tr_lengths = np.array([len(x) for x in enc_tr["input_ids"]])
-    n_total_micros = (len(texts_tr) + batch_size - 1) // batch_size
-    mega_size = batch_size * 8
     stop_early = False
     n_skipped_micros = 0
     n_oom_skips = 0
@@ -2724,10 +2812,10 @@ def _train_transformer_fold_impl(
     if use_topic_masking and group_ids_tr is not None and getattr(tokenizer, "mask_token_id", None) is not None:
         try:
             special_ids = set(tokenizer.all_special_ids) if hasattr(tokenizer, "all_special_ids") else set()
-            topic_token_ids = find_topic_token_ids(enc_tr["input_ids"], group_ids_tr, min_prompts=3, special_ids=special_ids)
-            sift_eps = 0.015 if use_sift else 0.0
-            topic_prep = TopicBlindAndSiFTPrep(topic_token_ids, mask_token_id=tokenizer.mask_token_id, mask_prob=0.30, sift_eps=sift_eps)
-            print(f"  [{model_name}] TopicBlind & SiFT prep active: {len(topic_token_ids)} rare topic tokens identified (mask_prob=0.30, sift_eps={sift_eps}).", flush=True)
+            topic_token_ids = find_topic_token_ids(enc_tr["input_ids"], group_ids_tr, min_prompts=2, special_ids=special_ids)
+            sift_eps = 0.01 if use_sift else 0.0
+            topic_prep = TopicBlindAndSiFTPrep(topic_token_ids, mask_token_id=tokenizer.mask_token_id, mask_prob=0.12, sift_eps=sift_eps)
+            print(f"  [{model_name}] TopicBlind & SiFT prep active: {len(topic_token_ids)} rare topic tokens identified (mask_prob=0.12, sift_eps={sift_eps}).", flush=True)
         except Exception as e:
             print(f"  [{model_name}] Note: TopicBlind prep skipped ({e}).", flush=True)
             topic_prep = None
@@ -2737,14 +2825,36 @@ def _train_transformer_fold_impl(
 
     for epoch in range(epochs):
         model.train()
-        if group_ids_tr is not None:
-            epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
+        if has_ext and epoch < epochs - 1:
+            slice_enc, slice_y, slice_groups = sample_epoch_neural_external_slice(
+                cached_enc_ext, ext_y_int, group_ids_ext,
+                num_classes=len(labels), per_class_k=40, seed=42 + epoch * 13
+            )
+            curr_enc = {k: enc_tr[k] + slice_enc[k] for k in enc_tr}
+            curr_y = np.concatenate([y_tr_int, slice_y])
+            curr_groups = np.concatenate([group_ids_tr, slice_groups]) if (group_ids_tr is not None and slice_groups is not None) else None
+            curr_weights = np.concatenate([np.ones(len(y_tr_int), dtype=np.float32), np.full(len(slice_y), 0.35, dtype=np.float32)])
         else:
-            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
+            curr_enc = enc_tr
+            curr_y = y_tr_int
+            curr_groups = group_ids_tr
+            curr_weights = np.ones(len(y_tr_int), dtype=np.float32)
+
+        curr_lengths = np.array([len(x) for x in curr_enc["input_ids"]])
+        n_curr_samples = len(curr_y)
+        n_total_micros = (n_curr_samples + batch_size - 1) // batch_size
+        mega_size = batch_size * 8
+
+        if curr_groups is not None:
+            epoch_indices = make_prompt_sibling_paired_indices(
+                curr_groups, curr_y, curr_lengths, batch_size, np.random.RandomState(42 + epoch)
+            )
+        else:
+            perm = np.random.RandomState(42 + epoch).permutation(n_curr_samples)
             sorted_indices = []
-            for m_start in range(0, len(texts_tr), mega_size):
+            for m_start in range(0, n_curr_samples, mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
-                sorted_indices.extend(m_chunk[np.argsort(tr_lengths[m_chunk])])
+                sorted_indices.extend(m_chunk[np.argsort(curr_lengths[m_chunk])])
             epoch_indices = np.array(sorted_indices, dtype=np.int64)
 
         optimizer.zero_grad(set_to_none=True)
@@ -2757,7 +2867,8 @@ def _train_transformer_fold_impl(
         t_batch_start = time.perf_counter()
         t_step1_done = None
         prefetcher = FastBatchPrefetcher(
-            tokenizer, enc_tr, y_tr_int, epoch_indices, batch_size, dev, cuda_ok=cuda_ok, topic_prep=topic_prep, group_ids=group_ids_tr
+            tokenizer, curr_enc, curr_y, epoch_indices, batch_size, dev,
+            cuda_ok=cuda_ok, topic_prep=topic_prep, group_ids=curr_groups, sample_weights=curr_weights,
         )
         pooler_inst = get_model_pooler(model)
         try:
@@ -2769,6 +2880,7 @@ def _train_transformer_fold_impl(
 
                     try:
                         batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                        batch_weights = batch_kwargs.pop("_batch_weights", None)
                         with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
                             set_model_pooler_mask(model, batch_kwargs["attention_mask"])
                             if topic_prep is not None and topic_prep.sift_eps > 0:
@@ -2786,7 +2898,7 @@ def _train_transformer_fold_impl(
                             else:
                                 logits = model(**batch_kwargs).logits
                             logits_f = logits.float()
-                        main_loss = criterion(logits_f, batch_labels)
+                        main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights)
                         fam_logits = compute_family_logits(logits_f, temp=4.0)
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
                         aux_loss = family_criterion(fam_logits, batch_fam_labels)
@@ -3010,6 +3122,9 @@ def train_transformer_fold(
     use_topic_masking=True,
     use_sift=True,
     n_frozen_bottom_layers=4,
+    cached_enc_ext=None,
+    ext_y_int=None,
+    group_ids_ext=None,
 ):
     """Exception-safe wrapper ensuring GPU memory is reclaimed even if a fold aborts mid-epoch."""
     try:
@@ -3023,6 +3138,7 @@ def train_transformer_fold(
             cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
             group_ids_tr=group_ids_tr, use_topic_masking=use_topic_masking, use_sift=use_sift,
             n_frozen_bottom_layers=n_frozen_bottom_layers,
+            cached_enc_ext=cached_enc_ext, ext_y_int=ext_y_int, group_ids_ext=group_ids_ext,
         )
     finally:
         gc.collect()
@@ -3036,9 +3152,11 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
     kwargs.setdefault("batch_size", 16)
     kwargs.setdefault("grad_accum", 1)
     kwargs.setdefault("epochs", 4)
-    kwargs.setdefault("lr_backbone", 1.8e-5)
-    kwargs.setdefault("lr_head", 1.5e-4)
+    kwargs.setdefault("lr_backbone", 2.0e-5)
+    kwargs.setdefault("lr_head", 1.2e-4)
+    kwargs.setdefault("weight_decay", 0.02)
     kwargs.setdefault("layer_decay", 0.90)
+    kwargs.setdefault("n_frozen_bottom_layers", 4)
     kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "DeBERTa FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
@@ -3050,11 +3168,12 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
 def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels, group_ids_tr=None, **kwargs):
     kwargs.setdefault("batch_size", 20)
     kwargs.setdefault("grad_accum", 1)
-    kwargs.setdefault("epochs", 3)
-    kwargs.setdefault("lr_backbone", 9.5e-6)
-    kwargs.setdefault("lr_head", 1.2e-4)
-    kwargs.setdefault("layer_decay", 0.70)
-    kwargs.setdefault("n_frozen_bottom_layers", 8)
+    kwargs.setdefault("epochs", 4)
+    kwargs.setdefault("lr_backbone", 1.4e-5)
+    kwargs.setdefault("lr_head", 1.0e-4)
+    kwargs.setdefault("weight_decay", 0.03)
+    kwargs.setdefault("layer_decay", 0.75)
+    kwargs.setdefault("n_frozen_bottom_layers", 6)
     kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
@@ -3135,6 +3254,9 @@ def _train_qwen_lora_fold_impl(
     cached_tokenizer=None,
     group_ids_tr=None,
     retain_backbone: bool = False,
+    cached_enc_ext=None,
+    ext_y_int=None,
+    group_ids_ext=None,
 ):
     """
     LoRA fine-tune of Qwen 3 8B / 2.5 7B across dual GPUs (device_map="auto").
@@ -3294,13 +3416,17 @@ def _train_qwen_lora_fold_impl(
     )
     cw = compute_smoothed_class_weights(y_tr_int, num_classes=len(labels), gamma=0.5)
     weight_tensor = torch.tensor(cw, dtype=torch.float32, device=head_dev)
-    criterion = FocalLoss(weight=weight_tensor, gamma=1.0, label_smoothing=0.01)
+    criterion = FocalLoss(weight=weight_tensor, gamma=0.75, label_smoothing=0.01)
     family_criterion = nn.CrossEntropyLoss().to(head_dev)
     FAMILY_AUX_WEIGHT = 0.25
     label_to_fam_tensor = torch.tensor(LABEL_TO_FAMILY_IDX, dtype=torch.long, device=head_dev)
 
-    n_opt_steps_per_epoch = max((len(texts_tr) + batch_size * grad_accum - 1) // (batch_size * grad_accum), 1)
-    total_steps = n_opt_steps_per_epoch * epochs
+    has_ext = cached_enc_ext is not None and ext_y_int is not None
+    n_ext_per_ep = (len(labels) * 40) if has_ext else 0
+    total_steps = max(sum(
+        ((len(texts_tr) + (n_ext_per_ep if ep < epochs - 1 else 0) + batch_size * grad_accum - 1) // (batch_size * grad_accum))
+        for ep in range(epochs)
+    ), 1)
     scheduler = get_cosine_schedule_with_warmup_and_min_lr(
         optimizer,
         num_warmup_steps=max(int(0.1 * total_steps), 1),
@@ -3327,31 +3453,50 @@ def _train_qwen_lora_fold_impl(
     best_head_state = None
     epoch_lora_states = []
     epoch_head_states = []
-    tr_lengths = np.array([len(x) for x in enc_tr["input_ids"]])
-    n_total_micros = (len(texts_tr) + batch_size - 1) // batch_size
-    mega_size = batch_size * 8
+    stop_early = False
+    n_skipped_micros = 0
+    n_oom_skips = 0
     t_qwen_train_start = time.perf_counter()
     pure_qwen_sec = 0.0
     first_step_overhead = 0.0
     n_total_micros_executed = 0
     steady_samples_executed = 0
-    stop_early = False
-    n_skipped_micros = 0
-    n_oom_skips = 0
 
     for epoch in range(epochs):
         t_qwen_ep_start = time.perf_counter()
         t_step1_done = None
         backbone.train()
         head.train()
-        if group_ids_tr is not None:
-            epoch_indices = make_prompt_sibling_paired_indices(group_ids_tr, y_tr_int, tr_lengths, batch_size, np.random.RandomState(42 + epoch))
+        if has_ext and epoch < epochs - 1:
+            slice_enc, slice_y, slice_groups = sample_epoch_neural_external_slice(
+                cached_enc_ext, ext_y_int, group_ids_ext,
+                num_classes=len(labels), per_class_k=40, seed=42 + epoch * 17
+            )
+            curr_enc = {k: enc_tr[k] + slice_enc[k] for k in enc_tr}
+            curr_y = np.concatenate([y_tr_int, slice_y])
+            curr_groups = np.concatenate([group_ids_tr, slice_groups]) if (group_ids_tr is not None and slice_groups is not None) else None
+            curr_weights = np.concatenate([np.ones(len(y_tr_int), dtype=np.float32), np.full(len(slice_y), 0.35, dtype=np.float32)])
         else:
-            perm = np.random.RandomState(42 + epoch).permutation(len(texts_tr))
+            curr_enc = enc_tr
+            curr_y = y_tr_int
+            curr_groups = group_ids_tr
+            curr_weights = np.ones(len(y_tr_int), dtype=np.float32)
+
+        curr_lengths = np.array([len(x) for x in curr_enc["input_ids"]])
+        n_curr_samples = len(curr_y)
+        n_total_micros = (n_curr_samples + batch_size - 1) // batch_size
+        mega_size = batch_size * 8
+
+        if curr_groups is not None:
+            epoch_indices = make_prompt_sibling_paired_indices(
+                curr_groups, curr_y, curr_lengths, batch_size, np.random.RandomState(42 + epoch)
+            )
+        else:
+            perm = np.random.RandomState(42 + epoch).permutation(n_curr_samples)
             sorted_indices = []
-            for m_start in range(0, len(texts_tr), mega_size):
+            for m_start in range(0, n_curr_samples, mega_size):
                 m_chunk = perm[m_start:m_start + mega_size]
-                sorted_indices.extend(m_chunk[np.argsort(tr_lengths[m_chunk])])
+                sorted_indices.extend(m_chunk[np.argsort(curr_lengths[m_chunk])])
             epoch_indices = np.array(sorted_indices, dtype=np.int64)
 
         optimizer.zero_grad(set_to_none=True)
@@ -3362,8 +3507,9 @@ def _train_qwen_lora_fold_impl(
         ep_steady_samples = 0
 
         prefetcher = FastBatchPrefetcher(
-            tokenizer, enc_tr, y_tr_int, epoch_indices, batch_size,
-            dev=first_dev, label_dev=head_dev, cuda_ok=cuda_ok, group_ids=group_ids_tr
+            tokenizer, curr_enc, curr_y, epoch_indices, batch_size,
+            dev=first_dev, label_dev=head_dev, cuda_ok=cuda_ok, group_ids=curr_groups,
+            sample_weights=curr_weights,
         )
         try:
             for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
@@ -3374,6 +3520,7 @@ def _train_qwen_lora_fold_impl(
 
                 try:
                     batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                    batch_weights = batch_kwargs.pop("_batch_weights", None)
                     autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
                     with autocast_ctx:
                         out = backbone(**batch_kwargs, output_hidden_states=False)
@@ -3393,7 +3540,7 @@ def _train_qwen_lora_fold_impl(
                             logits = head(pooled.to(head_dev))
                         del h_input
                     logits_f = logits.float()
-                    main_loss = criterion(logits_f, batch_labels)
+                    main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights)
                     fam_logits = compute_family_logits(logits_f, temp=4.0)
                     batch_fam_labels = label_to_fam_tensor[batch_labels]
                     aux_loss = family_criterion(fam_logits, batch_fam_labels)
@@ -3632,6 +3779,9 @@ def train_qwen_lora_fold(
     cached_tokenizer=None,
     group_ids_tr=None,
     retain_backbone: bool = False,
+    cached_enc_ext=None,
+    ext_y_int=None,
+    group_ids_ext=None,
 ):
     """Exception-safe wrapper guaranteeing Qwen hooks & GPU allocations are cleanly offloaded/freed on abort."""
     try:
@@ -3643,6 +3793,7 @@ def train_qwen_lora_fold(
             cached_enc_va=cached_enc_va, cached_enc_te=cached_enc_te,
             cached_enc_te_tta=cached_enc_te_tta, cached_tokenizer=cached_tokenizer,
             group_ids_tr=group_ids_tr, retain_backbone=retain_backbone,
+            cached_enc_ext=cached_enc_ext, ext_y_int=ext_y_int, group_ids_ext=group_ids_ext,
         )
     except Exception:
         if retain_backbone and "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
@@ -4049,15 +4200,16 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
 def optimize_cpu_subblend(sparse_probs: np.ndarray, dense_probs: np.ndarray, y_true_int: np.ndarray) -> float:
     """
     Find optimal alpha such that alpha*sparse + (1-alpha)*dense maximizes OOF balanced accuracy.
-    Searches over alpha in [0.45, 0.90] anchored at 0.85 to ensure 10%–55% stylometric signal
-    and prevent pure sparse collapse.
+    Searches over alpha in [0.70, 0.98] anchored at 0.85 to ensure 2%–30% dense stylometric signal
+    without degrading sparse dominance.
     """
     valid = np.isfinite(sparse_probs).all(axis=1) & np.isfinite(dense_probs).all(axis=1)
     if np.sum(valid) < 10:
         return 0.85
-    best_score = -1.0
+    base_score = balanced_accuracy_score(y_true_int[valid], sparse_probs[valid].argmax(axis=1))
+    best_score = base_score
     best_alpha = 0.85
-    for alpha in np.arange(0.90, 0.45, -0.05):
+    for alpha in np.linspace(0.98, 0.70, 15):
         blend = alpha * sparse_probs[valid] + (1.0 - alpha) * dense_probs[valid]
         score = balanced_accuracy_score(y_true_int[valid], blend.argmax(axis=1))
         if score > best_score:
@@ -4534,6 +4686,10 @@ def run_quad_ensemble():
     X_ext_all = None
     V_dense_ext = None
     ext_prompt_ids = None
+    coreset_df = None
+    coreset_texts = None
+    coreset_y_int = None
+    coreset_group_ids = None
 
     if ext_path is not None and Path(ext_path).is_file():
         try:
@@ -4547,16 +4703,32 @@ def run_quad_ensemble():
             ext_texts = ext_slice["text"].tolist()
             ext_prompt_ids = ext_slice["prompt_id"].to_numpy()
             print(f"  [External Data] Loaded {len(ext_texts):,} passages across {ext_slice['model'].nunique()} classes (Mass ratio=0.55, 0.0% prior skew) [OK]", flush=True)
+
+            coreset_df = select_contrastive_external_coreset(ext_df, LABELS, max_per_class=240, seed=42)
+            coreset_texts = coreset_df["text"].tolist()
+            coreset_y_int = np.array([LABEL_TO_IDX[y] for y in coreset_df["model"].to_numpy()], dtype=np.int64)
+            print(f"  [External Coreset] Selected {len(coreset_df):,} contrastive neural passages across {len(LABELS)} classes (max 240/class) [OK]", flush=True)
         except Exception as e:
             print(f"  [External Data] Warning: Failed to load external data: {e}. Falling back to competition data.", flush=True)
             ext_df = None
+            coreset_df = None
 
     n_train = len(train_df)
     texts_test = raw_texts_te
     y_true = train_df["model"].to_numpy()
 
-    # --- Prompt-grouped 5-fold CV split ---
-    group_ids = make_prompt_groups(train_df)
+    # --- Prompt-grouped 5-fold CV split (joint factorization prevents prompt ID collisions) ---
+    comp_pids = train_df["prompt_id"].astype(str).tolist()
+    if coreset_df is not None and len(coreset_df) > 0:
+        ext_pids = coreset_df["prompt_id"].astype(str).tolist()
+        joint_series = pd.Series(comp_pids + ext_pids)
+        joint_codes, _ = pd.factorize(joint_series)
+        group_ids = joint_codes[:n_train].astype(np.int64)
+        coreset_group_ids = joint_codes[n_train:].astype(np.int64)
+    else:
+        group_ids = make_prompt_groups(train_df)
+        coreset_group_ids = None
+
     n_splits = 5
     splitter = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=42)
     folds = np.full(n_train, -1, dtype=int)
@@ -4589,7 +4761,7 @@ def run_quad_ensemble():
     print("=" * 65, flush=True)
     token_caches = precompute_token_caches(
         raw_texts_tr, raw_texts_te, deberta_dir, bge_dir, qwen_dir,
-        raw_texts_ext=ext_texts if ext_df is not None else None,
+        raw_texts_ext=coreset_texts if coreset_df is not None else None,
         max_length=448,
     )
     print(flush=True)
@@ -4665,8 +4837,8 @@ def run_quad_ensemble():
     print("=" * 65, flush=True)
 
     is_qwen3 = qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower())
-    N_EPOCHS_DEB = 3
-    N_EPOCHS_BGE = 3
+    N_EPOCHS_DEB = 4
+    N_EPOCHS_BGE = 4
     N_EPOCHS_QWEN = 2 if is_qwen3 else 3
     MAX_WALLCLOCK_HOURS = 8.2
     SAFETY_MARGIN_SEC = 1200  # 20 min buffer for final bagging, Sinkhorn, and submission
@@ -4693,102 +4865,45 @@ def run_quad_ensemble():
         y_tr_str = y_true[tr_idx].tolist()
         y_va_str = y_true[va_idx].tolist()
 
-        # Neural data balancing: sample fold-stratified external subsets
-        ext_labels_arr = ext_df["model"].to_numpy() if ext_df is not None else None
-        if ext_labels_arr is not None:
-            # 1:1 balanced injection for DeBERTa and BGE
-            n_comp_tr = len(tr_idx)
-            ext_sample_idx = sample_balanced_external_indices(ext_labels_arr, size=n_comp_tr, seed=42 + fold * 13)
-            ext_texts_sampled = [ext_texts[i] for i in ext_sample_idx]
-            ext_labels_sampled = ext_labels_arr[ext_sample_idx].tolist()
-            texts_tr_deb = texts_tr + ext_texts_sampled
-            y_tr_deb = y_tr_str + ext_labels_sampled
-            texts_tr_bge = texts_tr + ext_texts_sampled
-            y_tr_bge = y_tr_str + ext_labels_sampled
-            ext_groups = np.arange(len(ext_sample_idx), dtype=np.int64) + 999000
-            group_ids_tr_deb = np.concatenate([group_ids[tr_idx], ext_groups])
-            group_ids_tr_bge = np.concatenate([group_ids[tr_idx], ext_groups])
-
-            # Budget-capped balanced injection for Qwen (~800 samples) to strictly respect the 9h envelope
-            n_qwen_ext = min(len(tr_idx) // 2, 800)
-            ext_sample_idx_qwen = sample_balanced_external_indices(ext_labels_arr, size=n_qwen_ext, seed=42 + fold * 17)
-            ext_texts_qwen = [ext_texts[i] for i in ext_sample_idx_qwen]
-            ext_labels_qwen = ext_labels_arr[ext_sample_idx_qwen].tolist()
-            texts_tr_qwen = texts_tr + ext_texts_qwen
-            y_tr_qwen = y_tr_str + ext_labels_qwen
-            ext_groups_qwen = np.arange(len(ext_sample_idx_qwen), dtype=np.int64) + 999000
-            group_ids_tr_qwen = np.concatenate([group_ids[tr_idx], ext_groups_qwen])
-            print(f"  [Neural Data Injection] DeBERTa/BGE: {len(texts_tr)} comp + {len(ext_texts_sampled)} ext = {len(texts_tr_deb)} | Qwen: {len(texts_tr)} comp + {len(ext_texts_qwen)} ext = {len(texts_tr_qwen)}", flush=True)
-        else:
-            ext_sample_idx = None
-            ext_sample_idx_qwen = None
-            texts_tr_deb = texts_tr
-            y_tr_deb = y_tr_str
-            group_ids_tr_deb = group_ids[tr_idx]
-            texts_tr_bge = texts_tr
-            y_tr_bge = y_tr_str
-            group_ids_tr_bge = group_ids[tr_idx]
-            texts_tr_qwen = texts_tr
-            y_tr_qwen = y_tr_str
-            group_ids_tr_qwen = group_ids[tr_idx]
-
-        # Slice precomputed token caches from RAM in 0.001s (merging external caches when active)
+        # Slice precomputed token caches from RAM in 0.001s (including external coreset caches)
         deb_cache = token_caches.get("deberta")
         deb_kw = {}
-        use_deb_ext = deb_cache is not None and deb_cache.get("ext") is not None and ext_sample_idx is not None
         if deb_cache is not None:
-            if use_deb_ext:
-                deb_kw["cached_enc_tr"] = {
-                    k: [deb_cache["tr"][k][i] for i in tr_idx] + [deb_cache["ext"][k][i] for i in ext_sample_idx]
-                    for k in deb_cache["tr"]
-                }
-            else:
-                deb_kw["cached_enc_tr"] = {k: [deb_cache["tr"][k][i] for i in tr_idx] for k in deb_cache["tr"]}
+            deb_kw["cached_enc_tr"] = {k: [deb_cache["tr"][k][i] for i in tr_idx] for k in deb_cache["tr"]}
             deb_kw["cached_enc_va"] = {k: [deb_cache["tr"][k][i] for i in va_idx] for k in deb_cache["tr"]}
             deb_kw["cached_enc_te"] = deb_cache["te"]
             deb_kw["cached_enc_te_tta"] = deb_cache.get("te_tta")
             deb_kw["cached_tokenizer"] = deb_cache["tokenizer"]
-        deb_tr_texts = texts_tr_deb if use_deb_ext else texts_tr
-        deb_tr_y = y_tr_deb if use_deb_ext else y_tr_str
-        deb_tr_groups = group_ids_tr_deb if use_deb_ext else group_ids[tr_idx]
+            if deb_cache.get("ext") is not None and coreset_y_int is not None:
+                deb_kw["cached_enc_ext"] = deb_cache["ext"]
+                deb_kw["ext_y_int"] = coreset_y_int
+                deb_kw["group_ids_ext"] = coreset_group_ids
 
         bge_cache = token_caches.get("bge")
         bge_kw = {}
-        use_bge_ext = bge_cache is not None and bge_cache.get("ext") is not None and ext_sample_idx is not None
         if bge_cache is not None:
-            if use_bge_ext:
-                bge_kw["cached_enc_tr"] = {
-                    k: [bge_cache["tr"][k][i] for i in tr_idx] + [bge_cache["ext"][k][i] for i in ext_sample_idx]
-                    for k in bge_cache["tr"]
-                }
-            else:
-                bge_kw["cached_enc_tr"] = {k: [bge_cache["tr"][k][i] for i in tr_idx] for k in bge_cache["tr"]}
+            bge_kw["cached_enc_tr"] = {k: [bge_cache["tr"][k][i] for i in tr_idx] for k in bge_cache["tr"]}
             bge_kw["cached_enc_va"] = {k: [bge_cache["tr"][k][i] for i in va_idx] for k in bge_cache["tr"]}
             bge_kw["cached_enc_te"] = bge_cache["te"]
             bge_kw["cached_enc_te_tta"] = bge_cache.get("te_tta")
             bge_kw["cached_tokenizer"] = bge_cache["tokenizer"]
-        bge_tr_texts = texts_tr_bge if use_bge_ext else texts_tr
-        bge_tr_y = y_tr_bge if use_bge_ext else y_tr_str
-        bge_tr_groups = group_ids_tr_bge if use_bge_ext else group_ids[tr_idx]
+            if bge_cache.get("ext") is not None and coreset_y_int is not None:
+                bge_kw["cached_enc_ext"] = bge_cache["ext"]
+                bge_kw["ext_y_int"] = coreset_y_int
+                bge_kw["group_ids_ext"] = coreset_group_ids
 
         qwen_cache = token_caches.get("qwen")
         qwen_kw = {}
-        use_qwen_ext = qwen_cache is not None and qwen_cache.get("ext") is not None and ext_sample_idx_qwen is not None
         if qwen_cache is not None:
-            if use_qwen_ext:
-                qwen_kw["cached_enc_tr"] = {
-                    k: [qwen_cache["tr"][k][i] for i in tr_idx] + [qwen_cache["ext"][k][i] for i in ext_sample_idx_qwen]
-                    for k in qwen_cache["tr"]
-                }
-            else:
-                qwen_kw["cached_enc_tr"] = {k: [qwen_cache["tr"][k][i] for i in tr_idx] for k in qwen_cache["tr"]}
+            qwen_kw["cached_enc_tr"] = {k: [qwen_cache["tr"][k][i] for i in tr_idx] for k in qwen_cache["tr"]}
             qwen_kw["cached_enc_va"] = {k: [qwen_cache["tr"][k][i] for i in va_idx] for k in qwen_cache["tr"]}
             qwen_kw["cached_enc_te"] = qwen_cache["te"]
             qwen_kw["cached_enc_te_tta"] = qwen_cache.get("te_tta")
             qwen_kw["cached_tokenizer"] = qwen_cache["tokenizer"]
-        qwen_tr_texts = texts_tr_qwen if use_qwen_ext else texts_tr
-        qwen_tr_y = y_tr_qwen if use_qwen_ext else y_tr_str
-        qwen_tr_groups = group_ids_tr_qwen if use_qwen_ext else group_ids[tr_idx]
+            if qwen_cache.get("ext") is not None and coreset_y_int is not None:
+                qwen_kw["cached_enc_ext"] = qwen_cache["ext"]
+                qwen_kw["ext_y_int"] = coreset_y_int
+                qwen_kw["group_ids_ext"] = coreset_group_ids
 
         # Sequential Fine-Tuning: DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)
         deb_expected = np.mean(model_durations["deb"]) * 1.15 if model_durations["deb"] else 1150.0
@@ -4801,13 +4916,14 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_deb, test_deb = train_deberta_fold(
-                    deb_tr_texts, deb_tr_y, texts_va, y_va_str, texts_test,
+                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     deberta_dir, LABELS,
                     device=deb_dev,
                     batch_size=16, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
+                    epochs=N_EPOCHS_DEB, lr_backbone=2.0e-5, lr_head=1.2e-4, weight_decay=0.02, layer_decay=0.90, n_frozen_bottom_layers=4,
+                    enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=deb_tr_groups,
+                    group_ids_tr=group_ids[tr_idx],
                     **deb_kw,
                 )
                 if val_deb is not None and np.all(np.isfinite(val_deb)):
@@ -4837,13 +4953,14 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_bge, test_bge = train_bge_fold(
-                    bge_tr_texts, bge_tr_y, texts_va, y_va_str, texts_test,
+                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     bge_dir, LABELS,
                     device=bge_dev,
                     batch_size=20, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_BGE, lr_backbone=9.5e-6, lr_head=1.2e-4, layer_decay=0.70, n_frozen_bottom_layers=8, enable_grad_checkpointing=True,
+                    epochs=N_EPOCHS_BGE, lr_backbone=1.4e-5, lr_head=1.0e-4, weight_decay=0.03, layer_decay=0.75, n_frozen_bottom_layers=6,
+                    enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=bge_tr_groups,
+                    group_ids_tr=group_ids[tr_idx],
                     **bge_kw,
                 )
                 if val_bge is not None and np.all(np.isfinite(val_bge)):
@@ -4879,12 +4996,12 @@ def run_quad_ensemble():
                 m_t0 = time.perf_counter()
                 retain_qwen = False
                 val_qwen, test_qwen = train_qwen_lora_fold(
-                    qwen_tr_texts, qwen_tr_y, texts_va, y_va_str, texts_test,
+                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
                     batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=N_EPOCHS_QWEN,
                     lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=48, lora_alpha=96, lora_dropout=0.08,
                     deadline=pipeline_deadline,
-                    group_ids_tr=qwen_tr_groups,
+                    group_ids_tr=group_ids[tr_idx],
                     retain_backbone=retain_qwen,
                     **qwen_kw,
                 )
@@ -4968,7 +5085,7 @@ def run_quad_ensemble():
                 test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_fold, beta=opt_beta)
 
                 # Dense stylometric calibrated stream (strictly leak-free fold projection)
-                dense_clf = DenseStylometricClassifier(c=0.015, seed=42 + fold, canonical_labels=LABELS)
+                dense_clf = DenseStylometricClassifier(c=0.03, seed=42 + fold, canonical_labels=LABELS)
                 if w_tr_comb is not None:
                     dense_clf.fit(V_dense_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
                 else:

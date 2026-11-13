@@ -2286,22 +2286,24 @@ def apply_column_mean_demeaning(
     """
     if val_logits is None or len(val_logits) == 0:
         return val_logits, test_logits, 0.0
-    col_mean = np.mean(val_logits, axis=0, keepdims=True)
+    val_rc = val_logits - np.mean(val_logits, axis=1, keepdims=True)
+    col_mean = np.mean(val_rc, axis=0, keepdims=True)
     best_tau = 0.0
-    best_score = float(balanced_accuracy_score(y_val, np.argmax(val_logits, axis=1)))
-    best_val = val_logits
+    best_score = float(balanced_accuracy_score(y_val, np.argmax(val_rc, axis=1)))
+    best_val = val_rc
     for tau in taus:
         if tau == 0.0:
             continue
-        cand_val = val_logits - tau * col_mean
+        cand_val = val_rc - tau * col_mean
         cand_score = float(balanced_accuracy_score(y_val, np.argmax(cand_val, axis=1)))
         if cand_score > best_score:
             best_score = cand_score
             best_tau = float(tau)
             best_val = cand_val
     if test_logits is not None:
-        t_col_mean = np.mean(test_logits, axis=0, keepdims=True) if len(test_logits) >= 36 else col_mean
-        best_test = test_logits - best_tau * t_col_mean
+        test_rc = test_logits - np.mean(test_logits, axis=1, keepdims=True)
+        t_col_mean = np.mean(test_rc, axis=0, keepdims=True) if len(test_rc) >= 36 else col_mean
+        best_test = test_rc - best_tau * t_col_mean
     else:
         best_test = None
     return best_val, best_test, best_tau
@@ -3791,58 +3793,58 @@ def _train_qwen_lora_fold_impl(
                             raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
                         captured_hs.clear()
                         out = h_input = logits = loss = batch_kwargs = batch_labels = None
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
-                    if cuda_ok:
-                        for gi in (first_dev, head_dev):
-                            if str(gi).startswith("cuda"):
-                                dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
-                                with torch.cuda.device(dev_idx):
-                                    torch.cuda.synchronize(dev_idx)
-                                    torch.cuda.empty_cache()
-                    continue
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
+                        if cuda_ok:
+                            for gi in (first_dev, head_dev):
+                                if str(gi).startswith("cuda"):
+                                    dev_idx = torch.device(gi).index if torch.device(gi).index is not None else 0
+                                    with torch.cuda.device(dev_idx):
+                                        torch.cuda.synchronize(dev_idx)
+                                        torch.cuda.empty_cache()
+                        continue
 
-                epoch_loss += loss_val
-                n_batches += 1
-                n_total_micros_executed += 1
-                n_b = int(batch_labels.numel())
-                ep_samples += n_b
-                if not (epoch == 0 and micro_step == 0):
-                    steady_samples_executed += n_b
-                    ep_steady_samples += n_b
-                accumulated_steps += 1
+                    epoch_loss += loss_val
+                    n_batches += 1
+                    n_total_micros_executed += 1
+                    n_b = int(batch_labels.numel())
+                    ep_samples += n_b
+                    if not (epoch == 0 and micro_step == 0):
+                        steady_samples_executed += n_b
+                        ep_steady_samples += n_b
+                    accumulated_steps += 1
 
-                if accumulated_steps == grad_accum:
-                    if cuda_ok:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
-                        old_scale = scaler.get_scale()
-                        scaler.step(optimizer)
-                        scaler.update()
-                        if scaler.get_scale() >= old_scale:
+                    if accumulated_steps == grad_accum:
+                        if cuda_ok:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
+                            old_scale = scaler.get_scale()
+                            scaler.step(optimizer)
+                            scaler.update()
+                            if scaler.get_scale() >= old_scale:
+                                scheduler.step()
+                        else:
+                            torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
+                            optimizer.step()
                             scheduler.step()
-                    else:
-                        torch.nn.utils.clip_grad_norm_(all_trainable_params, max_norm=1.0)
-                        optimizer.step()
-                        scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
-                    accumulated_steps = 0
+                        optimizer.zero_grad(set_to_none=True)
+                        accumulated_steps = 0
 
-                if micro_step == 0 and epoch == 0:
-                    t_step1_done = time.perf_counter()
-                    first_step_overhead = t_step1_done - t_qwen_ep_start
+                    if micro_step == 0 and epoch == 0:
+                        t_step1_done = time.perf_counter()
+                        first_step_overhead = t_step1_done - t_qwen_ep_start
 
-                log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
-                if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
-                    if t_step1_done is not None and micro_step > 0:
-                        step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
-                        step_sps = ep_steady_samples / step_elapsed
-                    else:
-                        step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
-                        step_sps = ep_samples / step_elapsed
-                    step_loss = epoch_loss / max(n_batches, 1)
-                    pct = ((micro_step + 1) / n_total_micros) * 100.0
-                    print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
+                    log_interval = max(n_total_micros // 5, 25) if n_total_micros >= 20 else n_total_micros
+                    if (micro_step + 1) % log_interval == 0 or (micro_step + 1) == n_total_micros:
+                        if t_step1_done is not None and micro_step > 0:
+                            step_elapsed = max(time.perf_counter() - t_step1_done, 0.001)
+                            step_sps = ep_steady_samples / step_elapsed
+                        else:
+                            step_elapsed = max(time.perf_counter() - t_qwen_ep_start, 0.001)
+                            step_sps = ep_samples / step_elapsed
+                        step_loss = epoch_loss / max(n_batches, 1)
+                        pct = ((micro_step + 1) / n_total_micros) * 100.0
+                        print(f"  [Qwen LoRA] Ep {epoch+1}/{epochs} | Step {micro_step+1}/{n_total_micros} ({pct:3.0f}%) | Loss: {step_loss:.4f} | Speed: {step_sps:5.2f} s/s {get_mem_status()}", flush=True)
         finally:
             prefetcher.close()
 
@@ -4213,7 +4215,7 @@ def compute_hierarchical_tree_probs(
     sum_e = max(sum(w_e), 1e-6)
     w_e = [w / sum_e for w in w_e]
 
-    if router_weights is None:
+    if router_weights is None or router_weights == expert_weights:
         r_base = [w if m is not None else 0.0 for w, m in zip(base_rw, models)]
         sum_rb = max(sum(r_base), 1e-6)
         r_base = [w / sum_rb for w in r_base]
@@ -5416,6 +5418,7 @@ def run_quad_ensemble():
                     temperatures=(0.20, 1.2, 1.5, 1.2),
                     balance_test=True,
                     apply_family_gating=True,
+                    router_weights=interim_weights,
                 )
                 validate_and_save_submission(
                     test_df["id"].tolist(),
@@ -5675,6 +5678,7 @@ def run_quad_ensemble():
                     balance_test=True,
                     apply_family_gating=True,
                     family_alpha=best_alpha,
+                    router_weights=best_w,
                 )
                 print("  [Final Blend] Generated test predictions via Quad-Rank Blend [OK]", flush=True)
         else:
@@ -5685,6 +5689,7 @@ def run_quad_ensemble():
                 balance_test=True,
                 apply_family_gating=True,
                 family_alpha=best_alpha,
+                router_weights=best_w,
             )
             print("  [Final Blend] Generated test predictions via Quad-Rank Blend [OK]", flush=True)
 

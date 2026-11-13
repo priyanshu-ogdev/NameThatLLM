@@ -272,17 +272,23 @@ SIBLING_DIFFICULTY_MARGINS = [
     0.08,  # kimi-k3 (distinct Chinese/English reasoning patterns)
 ]
 
-def compute_family_logits(model_logits: torch.Tensor, temp: float = 4.0) -> torch.Tensor:
+def compute_family_logits(model_logits: torch.Tensor, temp: float = 1.0) -> torch.Tensor:
     """
-    Derive per-family logits by temperature-smoothed log-sum-exp pooling within each family.
-    Scaling by temp=4.0 prevents hard max() saturation, ensuring family gradients distribute
-    smoothly across all sibling models rather than starving non-top siblings.
+    Cardinality-normalized smooth-max family logits:
+      z_fam = T * (logsumexp(z_m / T) - ln(|fam|))
+    Guarantees that when all 18 class logits are equal (z_m = c), EVERY family logit
+    equals c regardless of whether the family has 1 model (Kimi/Qwen) or 5 models (OpenAI/Anthropic)!
+    Eliminates the +6.44 bias toward 5-model families vs 1-model families.
     Pure functional construction avoids in-place slice mutation for kernel fusion & clean autograd.
     Shape: (N, 18) -> (N, n_families)
     """
-    scaled = model_logits / max(float(temp), 1e-4)
+    t = max(float(temp), 1e-4)
+    scaled = model_logits / t
     fam_cols = [
-        float(temp) * torch.logsumexp(scaled[:, FAMILY_TO_INDICES[fam]], dim=1)
+        t * (
+            torch.logsumexp(scaled[:, FAMILY_TO_INDICES[fam]], dim=1)
+            - math.log(max(len(FAMILY_TO_INDICES[fam]), 1))
+        )
         for fam in FAMILIES
     ]
     return torch.stack(fam_cols, dim=1)
@@ -653,10 +659,14 @@ def tokenize_with_head_tail(
     return primary
 
 
-def find_topic_token_ids(token_id_sequences, groups, min_prompts: int = 3, special_ids=None) -> set:
+def find_topic_token_ids(token_id_sequences, groups, min_prompts: int = 2, special_ids=None, tokenizer=None) -> set:
     """
-    Identifies token IDs that appear in fewer than min_prompts distinct prompt groups.
-    Special tokens, punctuation, whitespace, and structural markers are protected from masking.
+    Identifies rare content/topic token IDs appearing in fewer than min_prompts distinct prompts.
+    Strictly protects:
+      - Special tokens ([CLS], [SEP], [PAD], [MASK], etc.)
+      - Punctuation, symbols, markdown markers, and numbers
+      - Short stylistic/function words (length < 5)
+    Only pure alphabetic word tokens of length >= 5 appearing in < min_prompts prompts are flagged.
     """
     from collections import defaultdict
     if groups is None or len(token_id_sequences) != len(groups):
@@ -668,11 +678,23 @@ def find_topic_token_ids(token_id_sequences, groups, min_prompts: int = 3, speci
             token_groups[tok].add(g)
 
     special_set = set(special_ids) if special_ids else set()
-    topic_tokens = {
+    candidate_tokens = {
         tok for tok, g_set in token_groups.items()
         if len(g_set) < min_prompts and tok not in special_set
     }
-    return topic_tokens
+
+    if tokenizer is not None:
+        filtered_topic_tokens = set()
+        for tok_id in candidate_tokens:
+            try:
+                text = tokenizer.decode([tok_id]).strip()
+                if len(text) >= 5 and text.isalpha():
+                    filtered_topic_tokens.add(tok_id)
+            except Exception:
+                continue
+        return filtered_topic_tokens
+
+    return candidate_tokens
 
 
 def compute_same_prompt_sibling_repulsion(
@@ -699,13 +721,13 @@ def compute_same_prompt_sibling_repulsion(
     f_norm = F.normalize(representations.float(), p=2, dim=-1)
     cos_sim = torch.mm(f_norm, f_norm.t())
     viol = torch.clamp(cos_sim - margin, min=0.0).pow(2)
+    n_pairs = pair_mask.sum().clamp(min=1.0)
     if sample_weights is not None:
         sw = sample_weights.to(device=representations.device, dtype=torch.float32)
         pair_weights = (sw.unsqueeze(1) * sw.unsqueeze(0)) * pair_mask.float()
-        repulsion = (viol * pair_weights).sum() / pair_weights.sum().clamp(min=1e-6)
+        repulsion = (viol * pair_weights).sum() / n_pairs
     else:
-        n_pairs = pair_mask.sum()
-        repulsion = (viol * pair_mask.float()).sum() / n_pairs.clamp(min=1.0)
+        repulsion = (viol * pair_mask.float()).sum() / n_pairs
     return repulsion
 
 
@@ -1206,7 +1228,7 @@ def align_margins(margins: np.ndarray, model_classes: list, canonical_labels: li
     return aligned
 
 
-def compute_prompt_df_mask(X, groups, min_prompts=3):
+def compute_prompt_df_mask(X, groups, min_prompts=2):
     """
     Computes boolean feature mask based on Prompt Document Frequency.
     Prunes rare features appearing in fewer than min_prompts distinct prompts.
@@ -1232,6 +1254,7 @@ class NonLinearStylometricKernelExpander(BaseEstimator, TransformerMixin):
       3. Nyström RBF kernel approximation mapping to 256 non-linear components (gamma=1.0/n_feats).
     Total expansion: 145 (raw scaled) + 300 (quad cross-products) + 256 (RBF components) = 701 features.
     Provides regularized curved decision boundaries without memorizing training prompts in <0.5s per fold.
+    Protected Kernel Basis: when external data is present, basis vectors are fit strictly on competition rows.
     """
     def __init__(self, n_top_poly=24, n_nystroem=256, seed=42):
         self.n_top_poly = n_top_poly
@@ -1240,19 +1263,22 @@ class NonLinearStylometricKernelExpander(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         X = np.asarray(X, dtype=np.float64)
+        n_samples, n_feats = X.shape
+        fit_slice = slice(0, 2500) if n_samples > 2500 else slice(None)
         self.in_scaler_ = StandardScaler()
-        X_s = np.clip(self.in_scaler_.fit_transform(X), -6.0, 6.0)
+        self.in_scaler_.fit(X[fit_slice])
+        X_s = np.clip(self.in_scaler_.transform(X), -6.0, 6.0)
+        X_s_fit = X_s[fit_slice]
 
-        n_samples, n_feats = X_s.shape
-        iqr = np.percentile(X_s, 75, axis=0) - np.percentile(X_s, 25, axis=0)
+        iqr = np.percentile(X_s_fit, 75, axis=0) - np.percentile(X_s_fit, 25, axis=0)
         k_poly = min(self.n_top_poly, n_feats)
         self.top_poly_idx_ = np.argsort(-iqr)[:k_poly]
 
-        k_nys = min(self.n_nystroem, max(1, n_samples - 1))
+        k_nys = min(self.n_nystroem, max(1, X_s_fit.shape[0] - 1))
         self.nystroem_ = Nystroem(
             kernel="rbf", n_components=k_nys, random_state=self.seed, gamma=1.0 / max(n_feats, 1)
         )
-        self.nystroem_.fit(X_s)
+        self.nystroem_.fit(X_s_fit)
         return self
 
     def transform(self, X):
@@ -1328,32 +1354,59 @@ class DenseStylometricClassifier(BaseEstimator):
 class DualLinearClassifier(BaseEstimator):
     """
     Ensemble of LinearSVC (hinge loss margin maximizer) and RidgeClassifier (L2 regularized least squares).
+    Two-View Monotonic Architecture:
+      - View A (Pure Competition Specialist): svc_1_ + ridge_1_ fit strictly on pure competition data
+        with class_weight="balanced" (zero external domain shift).
+      - View B (External-Augmented Generalist): svc_2_ + ridge_2_ fit on competition + external data
+        with variance-capped sample weights.
+      - Validation-tuned mixing weight gamma in [0.0, 1.0] guarantees accuracy is monotonically >= pure competition baseline.
     Fast, memory-safe, and bounded to max_iter=800 with dual="auto" to guarantee rapid convergence.
-    Uses class_weight="balanced" to directly align optimization with Macro Balanced Accuracy.
-    Regularization tuned (c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70) to control variance under p >> n regime.
     Enforces canonical label ordering on decision_function output to guarantee ensemble alignment.
     Supports sample_weight with automatic class_weight=None override to prevent double-balancing inversion.
     """
-    def __init__(self, c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70, seed=42, class_weight="balanced", canonical_labels=None):
+    def __init__(self, c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70, seed=42, class_weight="balanced", canonical_labels=None, gamma=0.5):
         self.c_svc = c_svc
         self.alpha_ridge = alpha_ridge
         self.svc_weight = svc_weight
         self.seed = seed
         self.class_weight = class_weight
         self.canonical_labels = canonical_labels
+        self.gamma = gamma
+        self.gamma_ = gamma
 
-    def fit(self, X, y, sample_weight=None):
+    def fit(self, X, y, sample_weight=None, X_comb=None, y_comb=None, sample_weight_comb=None):
         cw = None if sample_weight is not None else self.class_weight
         self.svc_1_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 0.75, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
-        self.svc_2_ = LinearSVC(penalty="l2", loss="hinge", C=self.c_svc * 1.25, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
         self.ridge_1_ = RidgeClassifier(alpha=self.alpha_ridge * 0.6, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed)
-        self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed + 7)
 
-        for clf in (self.svc_1_, self.svc_2_, self.ridge_1_, self.ridge_2_):
-            if sample_weight is not None:
-                clf.fit(X, y, sample_weight=sample_weight)
+        # View A: Fit strictly on target domain (pure competition)
+        if sample_weight is not None:
+            self.svc_1_.fit(X, y, sample_weight=sample_weight)
+            self.ridge_1_.fit(X, y, sample_weight=sample_weight)
+        else:
+            self.svc_1_.fit(X, y)
+            self.ridge_1_.fit(X, y)
+
+        # View B: Fit on combined/augmented domain if provided, else on X
+        if X_comb is not None and y_comb is not None:
+            cw_comb = None if sample_weight_comb is not None else self.class_weight
+            self.svc_2_ = LinearSVC(penalty="l2", loss="hinge", C=self.c_svc * 1.25, class_weight=cw_comb, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
+            self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw_comb, random_state=self.seed + 7)
+            if sample_weight_comb is not None:
+                self.svc_2_.fit(X_comb, y_comb, sample_weight=sample_weight_comb)
+                self.ridge_2_.fit(X_comb, y_comb, sample_weight=sample_weight_comb)
             else:
-                clf.fit(X, y)
+                self.svc_2_.fit(X_comb, y_comb)
+                self.ridge_2_.fit(X_comb, y_comb)
+        else:
+            self.svc_2_ = LinearSVC(penalty="l2", loss="hinge", C=self.c_svc * 1.25, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
+            self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed + 7)
+            if sample_weight is not None:
+                self.svc_2_.fit(X, y, sample_weight=sample_weight)
+                self.ridge_2_.fit(X, y, sample_weight=sample_weight)
+            else:
+                self.svc_2_.fit(X, y)
+                self.ridge_2_.fit(X, y)
 
         self.svc_ = self.svc_1_
         self.ridge_ = self.ridge_1_
@@ -1364,19 +1417,52 @@ class DualLinearClassifier(BaseEstimator):
         else:
             self.classes_ = self.svc_1_.classes_
             self._raw_classes = raw_classes
+        self.gamma_ = self.gamma
         return self
+
+    def optimize_gamma(self, X_val, y_val_int, gammas=(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0)):
+        """
+        Tunes gamma on the validation split to guarantee accuracy is monotonically >= pure competition baseline.
+        gamma=1.0 represents 100% pure competition specialist (View A).
+        """
+        def _get_2d(clf):
+            d = clf.decision_function(X_val)
+            return np.column_stack([-d, d]) if d.ndim == 1 else d
+
+        m_v1 = self.svc_weight * _get_2d(self.svc_1_) + (1.0 - self.svc_weight) * _get_2d(self.ridge_1_)
+        m_v2 = self.svc_weight * _get_2d(self.svc_2_) + (1.0 - self.svc_weight) * _get_2d(self.ridge_2_)
+        if self.canonical_labels is not None:
+            raw_classes_1 = list(self.svc_1_.classes_)
+            raw_classes_2 = list(self.svc_2_.classes_)
+            m_v1 = align_margins(m_v1, raw_classes_1, self.canonical_labels)
+            m_v2 = align_margins(m_v2, raw_classes_2, self.canonical_labels)
+
+        best_gamma = 1.0  # Anchor on pure competition baseline
+        best_score = float(balanced_accuracy_score(y_val_int, np.argmax(m_v1, axis=1)))
+        for g in gammas:
+            cand_m = g * m_v1 + (1.0 - g) * m_v2
+            cand_score = float(balanced_accuracy_score(y_val_int, np.argmax(cand_m, axis=1)))
+            if cand_score > best_score:
+                best_score = cand_score
+                best_gamma = float(g)
+
+        self.gamma_ = best_gamma
+        return self.gamma_
 
     def decision_function(self, X):
         def _get_2d(clf):
             d = clf.decision_function(X)
             return np.column_stack([-d, d]) if d.ndim == 1 else d
 
-        d_svc = 0.55 * _get_2d(self.svc_1_) + 0.45 * _get_2d(self.svc_2_)
-        d_ridge = 0.50 * _get_2d(self.ridge_1_) + 0.50 * _get_2d(self.ridge_2_)
-        m = self.svc_weight * d_svc + (1.0 - self.svc_weight) * d_ridge
+        m_v1 = self.svc_weight * _get_2d(self.svc_1_) + (1.0 - self.svc_weight) * _get_2d(self.ridge_1_)
+        m_v2 = self.svc_weight * _get_2d(self.svc_2_) + (1.0 - self.svc_weight) * _get_2d(self.ridge_2_)
         if self.canonical_labels is not None:
-            return align_margins(m, self._raw_classes, self.canonical_labels)
-        return m
+            raw_classes_1 = list(self.svc_1_.classes_)
+            raw_classes_2 = list(self.svc_2_.classes_)
+            m_v1 = align_margins(m_v1, raw_classes_1, self.canonical_labels)
+            m_v2 = align_margins(m_v2, raw_classes_2, self.canonical_labels)
+        g = getattr(self, "gamma_", self.gamma)
+        return g * m_v1 + (1.0 - g) * m_v2
 
 
 class IntraFamilyCliqueSpecialist(BaseEstimator):
@@ -2005,6 +2091,7 @@ class StylometricMultiMomentPooler(nn.Module):
     Normalizes each statistical moment independently before projection so extreme h_max spikes
     never drown out h_mean or syntactic dispersion h_std.
     Supports Multi-Layer Hidden State Fusion across discourse (-1), syntax (-3), and surface structure (-6).
+    Applies moment dropout (0.20) and anchors representation with 0.5x scaling on high-variance moments (max/std).
     """
     def __init__(self, hidden_size: int):
         super().__init__()
@@ -2014,6 +2101,7 @@ class StylometricMultiMomentPooler(nn.Module):
         self.norm_mean = nn.LayerNorm(hidden_size)
         self.norm_max = nn.LayerNorm(hidden_size)
         self.norm_std = nn.LayerNorm(hidden_size)
+        self.moment_drop = nn.Dropout(0.20)
         self.dense = nn.Linear(hidden_size * 4, hidden_size)
         self.activation = nn.GELU()
         self.norm_out = nn.LayerNorm(hidden_size)
@@ -2056,7 +2144,8 @@ class StylometricMultiMomentPooler(nn.Module):
             h_max_raw, _ = hidden_states.max(dim=1)
             h_max = self.norm_max(h_max_raw)
             h_std = self.norm_std(torch.sqrt(torch.clamp(hidden_states.var(dim=1, unbiased=False), min=1e-6)))
-        fused = torch.cat([h_cls, h_mean, h_max, h_std], dim=-1)
+        fused = torch.cat([h_cls, h_mean, 0.5 * h_max, 0.5 * h_std], dim=-1)
+        fused = self.moment_drop(fused)
         return self.norm_out(self.activation(self.dense(fused)))
 
 
@@ -2085,19 +2174,21 @@ def set_model_pooler_mask(model, mask):
 
 
 class FocalLoss(nn.Module):
-    """
-    Focal Loss with per-class weighting and sibling difficulty angular margins.
+    r"""
+    Focal Loss with per-class weighting and symmetric intra-family sibling difficulty margins.
     Modulates cross entropy by (1 - p_t)^gamma using the predicted probability of the true class.
     Down-weights well-classified easy examples to focus gradients on hard minority classes.
     alpha (class weights) additionally up-weights rare classes.
-    Sibling difficulty margins Delta_c force larger angular separation for ambiguous sibling cliques.
+    Symmetric intra-family margins force separation strictly among competing siblings (c in F_k \ {y})
+    without biasing the stationary class prior or logit offsets at evaluation time.
     """
-    def __init__(self, weight=None, gamma=0.75, label_smoothing=0.01, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None):
+    def __init__(self, weight=None, gamma=0.75, label_smoothing=0.01, reduction="mean", use_sibling_margins: bool = True, sibling_margins=None, intra_family_margin: float = 0.12):
         super().__init__()
         self.gamma = gamma
         self.label_smoothing = label_smoothing
         self.reduction = reduction
         self.use_sibling_margins = use_sibling_margins
+        self.intra_family_margin = intra_family_margin
         if weight is not None:
             self.register_buffer("weight", weight)
         else:
@@ -2111,11 +2202,23 @@ class FocalLoss(nn.Module):
         else:
             self.sibling_margins = None
 
+        # Build intra-family sibling mask: (18, 18), mask[i, j] = 1.0 iff i and j share a family and i != j
+        intra_mask = torch.zeros((len(LABELS), len(LABELS)), dtype=torch.float32)
+        for fam, idxs in FAMILY_TO_INDICES.items():
+            for i in idxs:
+                for j in idxs:
+                    if i != j:
+                        intra_mask[i, j] = 1.0
+        self.register_buffer("intra_family_mask", intra_mask)
+
     def forward(self, logits, targets, sample_weights=None, margin_scale: float = 0.5):
         num_classes = logits.size(-1)
         targets = targets.to(device=logits.device, dtype=torch.long).clamp(0, num_classes - 1)
         logits_f = logits.float()
-        if self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
+        if self.use_sibling_margins and hasattr(self, "intra_family_mask") and self.intra_family_mask is not None and self.intra_family_mask.size(0) == num_classes:
+            sib_penalty = (self.intra_family_margin * margin_scale) * self.intra_family_mask.to(logits.device)[targets]
+            logits_f = logits_f + sib_penalty
+        elif self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
             sm = margin_scale * self.sibling_margins.to(logits.device)
             target_margins = sm[targets].unsqueeze(1)
             logits_f = logits_f.scatter_add(1, targets.unsqueeze(1), -target_margins)
@@ -2143,6 +2246,39 @@ class FocalLoss(nn.Module):
         elif self.reduction == "sum":
             return loss.sum()
         return loss
+
+
+def apply_column_mean_demeaning(
+    val_logits: np.ndarray,
+    y_val: np.ndarray,
+    test_logits: np.ndarray = None,
+    taus=(0.0, 0.5, 1.0),
+) -> tuple[np.ndarray, np.ndarray | None, float]:
+    """
+    Validation-Tuned Prior Alignment (Column-Mean Demeaning):
+      z_cal = z - tau_col * col_mean
+    Subtracting the validation column mean centers each class logit, eliminating
+    the stationary logit shift (+m_c) from training class weighting and sibling margins.
+    Tuned over tau in [0.0, 0.5, 1.0] to maximize Macro Balanced Accuracy on the validation fold.
+    Returns: (best_val_logits, best_test_logits_if_provided, best_tau)
+    """
+    if val_logits is None or len(val_logits) == 0:
+        return val_logits, test_logits, 0.0
+    col_mean = np.mean(val_logits, axis=0, keepdims=True)
+    best_tau = 0.0
+    best_score = float(balanced_accuracy_score(y_val, np.argmax(val_logits, axis=1)))
+    best_val = val_logits
+    for tau in taus:
+        if tau == 0.0:
+            continue
+        cand_val = val_logits - tau * col_mean
+        cand_score = float(balanced_accuracy_score(y_val, np.argmax(cand_val, axis=1)))
+        if cand_score > best_score:
+            best_score = cand_score
+            best_tau = float(tau)
+            best_val = cand_val
+    best_test = (test_logits - best_tau * col_mean) if test_logits is not None else None
+    return best_val, best_test, best_tau
 
 
 class BalancedLogitAdjustedLDAMLoss(nn.Module):
@@ -2832,10 +2968,10 @@ def _train_transformer_fold_impl(
     if use_topic_masking and group_ids_tr is not None and getattr(tokenizer, "mask_token_id", None) is not None:
         try:
             special_ids = set(tokenizer.all_special_ids) if hasattr(tokenizer, "all_special_ids") else set()
-            topic_token_ids = find_topic_token_ids(enc_tr["input_ids"], group_ids_tr, min_prompts=2, special_ids=special_ids)
+            topic_token_ids = find_topic_token_ids(enc_tr["input_ids"], group_ids_tr, min_prompts=2, special_ids=special_ids, tokenizer=tokenizer)
             sift_eps = 0.01 if use_sift else 0.0
-            topic_prep = TopicBlindAndSiFTPrep(topic_token_ids, mask_token_id=tokenizer.mask_token_id, mask_prob=0.12, sift_eps=sift_eps)
-            print(f"  [{model_name}] TopicBlind & SiFT prep active: {len(topic_token_ids)} rare topic tokens identified (mask_prob=0.12, sift_eps={sift_eps}).", flush=True)
+            topic_prep = TopicBlindAndSiFTPrep(topic_token_ids, mask_token_id=tokenizer.mask_token_id, mask_prob=0.10, sift_eps=sift_eps)
+            print(f"  [{model_name}] TopicBlind & SiFT prep active: {len(topic_token_ids)} rare topic tokens identified (mask_prob=0.10, sift_eps={sift_eps}).", flush=True)
         except Exception as e:
             print(f"  [{model_name}] Note: TopicBlind prep skipped ({e}).", flush=True)
             topic_prep = None
@@ -2920,7 +3056,7 @@ def _train_transformer_fold_impl(
                                 logits = model(**batch_kwargs).logits
                             logits_f = logits.float()
                         main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights, margin_scale=0.5 * (epoch + 1) / epochs)
-                        fam_logits = compute_family_logits(logits_f, temp=4.0)
+                        fam_logits = compute_family_logits(logits_f, temp=1.0)
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
                         raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
                         if batch_weights is not None:
@@ -3049,9 +3185,10 @@ def _train_transformer_fold_impl(
             break
 
         val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
-        val_preds = np.argmax(val_logits, axis=1)
+        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+        val_preds = np.argmax(val_logits_cal, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
-        print(f"  [{model_name}] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} {get_mem_status(dev)}", flush=True)
+        print(f"  [{model_name}] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.1f}) {get_mem_status(dev)}", flush=True)
 
         if val_score > best_val_score:
             best_val_score = val_score
@@ -3090,8 +3227,9 @@ def _train_transformer_fold_impl(
                 swa_state[k] = acc
             model.load_state_dict({k: v.to(dev) for k, v in swa_state.items()}, strict=False)
             swa_val_logits = evaluate_transformer_split(model, enc_va, tokenizer, dev, use_amp, len(labels))
-            swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_logits, axis=1))
-            print(f"  [{model_name}] SWA Checkpoint Averaged ({len(epoch_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (vs Best Single {best_val_score:.4f})", flush=True)
+            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+            swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_cal, axis=1))
+            print(f"  [{model_name}] SWA Checkpoint Averaged ({len(epoch_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.1f}, vs Best Single {best_val_score:.4f})", flush=True)
             if swa_val_score >= best_val_score:
                 best_val_score = swa_val_score
                 best_val_logits = swa_val_logits
@@ -3106,6 +3244,14 @@ def _train_transformer_fold_impl(
         model.load_state_dict({k: v.to(dev) for k, v in best_state.items()}, strict=False)
 
     test_logits = evaluate_transformer_split(model, enc_te, tokenizer, dev, use_amp, len(labels), enc_data_tta=cached_enc_te_tta) if best_val_logits is not None else None
+
+    if best_val_logits is not None:
+        best_val_logits, test_logits, best_tau = apply_column_mean_demeaning(
+            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.5, 1.0)
+        )
+        best_val_score = float(balanced_accuracy_score(y_va_int, np.argmax(best_val_logits, axis=1)))
+        if best_tau > 0.0:
+            print(f"  [{model_name}] Optimal Column-Mean Demeaning (tau={best_tau:.1f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
 
     set_model_pooler_mask(model, None)
     del model, optimizer, scheduler, epoch_states
@@ -3494,9 +3640,10 @@ def _train_qwen_lora_fold_impl(
         backbone.train()
         head.train()
         if has_ext and epoch < epochs - 1:
+            qwen_per_class_k = 20 if epochs <= 2 else 25
             slice_enc, slice_y, slice_groups = sample_epoch_neural_external_slice(
                 cached_enc_ext, ext_y_int, group_ids_ext,
-                num_classes=len(labels), per_class_k=25, seed=42 + epoch * 17
+                num_classes=len(labels), per_class_k=qwen_per_class_k, seed=42 + epoch * 17
             )
             curr_enc = {k: enc_tr[k] + slice_enc[k] for k in enc_tr}
             curr_y = np.concatenate([y_tr_int, slice_y])
@@ -3572,7 +3719,7 @@ def _train_qwen_lora_fold_impl(
                             del h_input
                         logits_f = logits.float()
                         main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights, margin_scale=1.5 * (epoch + 1) / epochs)
-                        fam_logits = compute_family_logits(logits_f, temp=4.0)
+                        fam_logits = compute_family_logits(logits_f, temp=1.0)
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
                         raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
                         if batch_weights is not None:
@@ -3685,9 +3832,10 @@ def _train_qwen_lora_fold_impl(
             print(f"  [Qwen LoRA] Time Guard triggered before any gradient step in Ep {epoch+1}; skipping untrained fold eval.", flush=True)
             break
         val_logits = evaluate_qwen_split(backbone, head, enc_va, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
-        val_preds = np.argmax(val_logits, axis=1)
+        val_logits_cal, _, tau_ep = apply_column_mean_demeaning(val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+        val_preds = np.argmax(val_logits_cal, axis=1)
         val_score = balanced_accuracy_score(y_va_int, val_preds)
-        print(f"  [Qwen LoRA] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} {get_mem_status()}", flush=True)
+        print(f"  [Qwen LoRA] Epoch {epoch+1}/{epochs} | Train Loss: {avg_loss:.4f} | Val Bal Acc: {val_score:.4f} (tau={tau_ep:.1f}) {get_mem_status()}", flush=True)
 
         if val_score > best_val_score:
             best_val_score = val_score
@@ -3732,8 +3880,9 @@ def _train_qwen_lora_fold_impl(
             backbone.load_state_dict(swa_lora, strict=False)
             head.load_state_dict(swa_head)
             swa_val_logits = evaluate_qwen_split(backbone, head, enc_va, tokenizer, first_dev, head_dev, cuda_ok, len(labels))
-            swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_logits, axis=1))
-            print(f"  [Qwen LoRA] SWA Checkpoint Averaged ({len(epoch_lora_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (vs Best Single {best_val_score:.4f})", flush=True)
+            swa_val_cal, _, swa_tau = apply_column_mean_demeaning(swa_val_logits, y_va_int, taus=(0.0, 0.5, 1.0))
+            swa_val_score = balanced_accuracy_score(y_va_int, np.argmax(swa_val_cal, axis=1))
+            print(f"  [Qwen LoRA] SWA Checkpoint Averaged ({len(epoch_lora_states)} epochs) | Val Bal Acc: {swa_val_score:.4f} (tau={swa_tau:.1f}, vs Best Single {best_val_score:.4f})", flush=True)
             if swa_val_score >= best_val_score:
                 best_val_score = swa_val_score
                 best_val_logits = swa_val_logits
@@ -3757,6 +3906,14 @@ def _train_qwen_lora_fold_impl(
             head.load_state_dict(best_head_state)
 
     test_logits = evaluate_qwen_split(backbone, head, enc_te, tokenizer, first_dev, head_dev, cuda_ok, len(labels), enc_data_tta=cached_enc_te_tta) if best_val_logits is not None else None
+
+    if best_val_logits is not None:
+        best_val_logits, test_logits, best_tau = apply_column_mean_demeaning(
+            best_val_logits, y_va_int, test_logits=test_logits, taus=(0.0, 0.5, 1.0)
+        )
+        best_val_score = float(balanced_accuracy_score(y_va_int, np.argmax(best_val_logits, axis=1)))
+        if best_tau > 0.0:
+            print(f"  [Qwen LoRA] Optimal Column-Mean Demeaning (tau={best_tau:.1f}) calibrated on fold: Val Bal Acc {best_val_score:.4f}", flush=True)
 
     del head, optimizer, scheduler, epoch_lora_states, epoch_head_states
     if "swa_lora" in locals():
@@ -5020,21 +5177,23 @@ def run_quad_ensemble():
 
         # ── 3. Qwen LoRA fine-tune (Dual GPU) ───────────
         qwen_bs = 8 if is_qwen3 else 16
-        qwen_ga = 2 if is_qwen3 else 1
-        qwen_lr_lora = 1.5e-4 if is_qwen3 else 1.2e-4
-        qwen_lr_head = 2.2e-4 if is_qwen3 else 1.8e-4
+        qwen_ga = 1 if is_qwen3 else 1
+        qwen_lr_lora = 1.8e-4 if is_qwen3 else 1.2e-4
+        qwen_lr_head = 4.0e-4 if is_qwen3 else 1.8e-4
+        qwen_lora_r = 32 if is_qwen3 else 48
+        qwen_lora_alpha = 64 if is_qwen3 else 96
         qwen_desc = "Qwen 3 8B" if is_qwen3 else "Qwen 2.5 7B"
-        qwen_expected = np.mean(model_durations["qwen"]) * 1.15 if model_durations["qwen"] else (3300.0 if is_qwen3 else 2400.0)
+        qwen_expected = np.mean(model_durations["qwen"]) * 1.15 if model_durations["qwen"] else (2800.0 if is_qwen3 else 2400.0)
         if qwen_dir is not None and (time.perf_counter() + qwen_expected < pipeline_deadline):
             try:
-                print(f"\n[Fold {fold+1}] {qwen_desc} LoRA fine-tune (device_map=auto, r=48, BS={qwen_bs}, GA={qwen_ga}, epochs={N_EPOCHS_QWEN}, L=448)", flush=True)
+                print(f"\n[Fold {fold+1}] {qwen_desc} LoRA fine-tune (device_map=auto, r={qwen_lora_r}, BS={qwen_bs}, GA={qwen_ga}, epochs={N_EPOCHS_QWEN}, L=448)", flush=True)
                 m_t0 = time.perf_counter()
                 retain_qwen = (fold < n_splits - 1)
                 val_qwen, test_qwen = train_qwen_lora_fold(
                     texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
                     batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=N_EPOCHS_QWEN,
-                    lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=48, lora_alpha=96, lora_dropout=0.08,
+                    lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=qwen_lora_r, lora_alpha=qwen_lora_alpha, lora_dropout=0.08,
                     deadline=pipeline_deadline,
                     group_ids_tr=group_ids[tr_idx],
                     retain_backbone=retain_qwen,
@@ -5062,8 +5221,8 @@ def run_quad_ensemble():
 
         # ── 4. CPU Multiview Dual-Linear (Sparse CSR + PromptDF Filter + Sibling Specialists) ──
         try:
-            print(f"\n[Fold {fold+1}] CPU Multiview Dual-Linear (Sparse CSR + PromptDF Filter + Sibling Specialists) {get_mem_status(None)}", flush=True)
-            pdf_mask = compute_prompt_df_mask(X_train_all[tr_idx], group_ids[tr_idx], min_prompts=3)
+            print(f"\n[Fold {fold+1}] CPU Multiview Dual-Linear (Two-View Monotonic Sparse CSR + PromptDF Filter + Sibling Specialists) {get_mem_status(None)}", flush=True)
+            pdf_mask = compute_prompt_df_mask(X_train_all[tr_idx], group_ids[tr_idx], min_prompts=2)
             keep_cols = np.flatnonzero(pdf_mask)
             X_tr_fold = X_train_all[tr_idx][:, keep_cols]
             X_va_fold = X_train_all[va_idx][:, keep_cols]
@@ -5071,12 +5230,14 @@ def run_quad_ensemble():
 
             cpu_clf = DualLinearClassifier(c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70, seed=42 + fold, canonical_labels=LABELS)
             clique_specialist = IntraFamilyCliqueSpecialist(alpha_ridge=1.0, beta_refine=0.25, seed=42 + fold)
+            y_va_int_fold = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
+
             with threadpool_limits(limits=4):
                 if X_ext_all is not None:
                     # Bounded-variance mass conservation & regularization invariance (Sum(w) == n_comp)
                     w_comp_fold, w_ext_fold = compute_fold_variance_capped_weights(
                         y_true[tr_idx], ext_df["model"].to_numpy(), ext_df["_n_models"].to_numpy(),
-                        n_classes=NUM_CLASSES, ext_mass_ratio=0.55, max_single_ext_weight=0.35,
+                        n_classes=NUM_CLASSES, ext_mass_ratio=0.30, max_single_ext_weight=0.35,
                     )
                     X_ext_fold = X_ext_all[:, keep_cols]
                     X_tr_comb = sp.vstack([X_tr_fold, X_ext_fold])
@@ -5095,7 +5256,11 @@ def run_quad_ensemble():
                     V_dense_va = subspace_proj.transform(V_dense_all[va_idx])
                     V_dense_te = subspace_proj.transform(V_dense_all[n_tr:])
 
-                    cpu_clf.fit(X_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
+                    # Two-View Fit: View A on pure comp, View B on external-augmented comb
+                    cpu_clf.fit(X_tr_fold, y_tr_str, X_comb=X_tr_comb, y_comb=y_tr_comb, sample_weight_comb=w_tr_comb)
+                    opt_gamma = cpu_clf.optimize_gamma(X_va_fold, y_va_int_fold)
+                    print(f"  [CPU Linear] Fold {fold+1} Two-View blend: gamma={opt_gamma:.2f} (Pure View A {opt_gamma*100:.0f}%, Ext View B {(1.0-opt_gamma)*100:.0f}%)", flush=True)
+
                     clique_specialist.fit(X_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
                 else:
                     X_tr_comb = X_tr_fold
@@ -5106,14 +5271,13 @@ def run_quad_ensemble():
                     V_dense_tr_comb = subspace_proj.transform(V_dense_all[tr_idx])
                     V_dense_va = subspace_proj.transform(V_dense_all[va_idx])
                     V_dense_te = subspace_proj.transform(V_dense_all[n_tr:])
-                    cpu_clf.fit(X_tr_comb, y_tr_comb)
+                    cpu_clf.fit(X_tr_fold, y_tr_str)
                     clique_specialist.fit(X_tr_comb, y_tr_comb)
 
                 val_sparse_m = cpu_clf.decision_function(X_va_fold)
                 test_sparse_m = cpu_clf.decision_function(X_te_fold)
 
                 # Intra-family sibling tie-breaking refinement with validation-tuned beta (single delta pass per split)
-                y_va_int_fold = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
                 deltas_va = clique_specialist._compute_sibling_deltas(X_va_fold, val_sparse_m.shape[0], val_sparse_m.shape[1])
                 opt_beta = clique_specialist.optimize_beta(val_sparse_m, X_va_fold, y_va_int_fold, precomputed_deltas=deltas_va)
                 val_sparse_m = clique_specialist.refine_margins(val_sparse_m, X_va_fold, beta=opt_beta, precomputed_deltas=deltas_va)

@@ -309,8 +309,10 @@ def run_dry_run_verifier():
     # ── CHECK 5: Qwen LoRA Mini-Training Across Dual GPUs ────────
     qwen_desc = "Qwen 3 8B" if is_qwen3 else "Qwen 2.5 7B"
     qwen_bs = 8 if is_qwen3 else 16
-    qwen_ga = 2 if is_qwen3 else 1
-    print(f"[Check 5/9] Testing {qwen_desc} LoRA Mini-Training (device_map=auto, BS={qwen_bs}, GA={qwen_ga})...", flush=True)
+    qwen_ga = 1 if is_qwen3 else 1
+    qwen_lora_r = 32 if is_qwen3 else 48
+    qwen_lora_alpha = 64 if is_qwen3 else 96
+    print(f"[Check 5/9] Testing {qwen_desc} LoRA Mini-Training (device_map=auto, r={qwen_lora_r}, BS={qwen_bs}, GA={qwen_ga})...", flush=True)
     # Unit-verify SpikeAndGapHierarchicalHead with intermediate hidden state tuples
     mock_qhead = SpikeAndGapHierarchicalHead(hidden_size=128, num_classes=NUM_CLASSES)
     mock_h = (torch.randn(2, 8, 128), torch.randn(2, 8, 128), torch.randn(2, 8, 128))
@@ -378,7 +380,7 @@ def run_dry_run_verifier():
             texts_tr, y_tr_str, texts_va, y_va_str, texts_te,
             qwen_dir, LABELS,
             batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=1,
-            lora_r=48, lora_alpha=96,
+            lora_r=qwen_lora_r, lora_alpha=qwen_lora_alpha,
             group_ids_tr=group_ids_mini_tr,
             retain_backbone=True,
             **qwen_smoke_kw,
@@ -505,9 +507,14 @@ def run_dry_run_verifier():
             comb_V_fold = V_dense_tr
             comb_pids_fold = group_ids_mini_tr
 
-        # DualLinearClassifier (c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70 matching production)
+        # DualLinearClassifier (Two-View Monotonic matching production)
         clf = DualLinearClassifier(c_svc=1.5, alpha_ridge=1.0, svc_weight=0.70, seed=42, canonical_labels=LABELS)
-        clf.fit(X_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
+        y_va_int = np.array([LABEL_TO_IDX[y] for y in y_va_str], dtype=np.int64)
+        if X_ext_mini is not None:
+            clf.fit(X_tr_masked, y_tr_str, X_comb=X_tr_comb, y_comb=y_tr_comb, sample_weight_comb=w_tr_comb)
+            opt_gamma = clf.optimize_gamma(X_va_masked, y_va_int)
+        else:
+            clf.fit(X_tr_masked, y_tr_str)
         val_sparse_m = clf.decision_function(X_va_masked)
         test_sparse_m = clf.decision_function(X_te_masked)
 

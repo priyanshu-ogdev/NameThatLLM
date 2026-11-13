@@ -5279,7 +5279,7 @@ def run_quad_ensemble():
             try:
                 print(f"\n[Fold {fold+1}] {qwen_desc} LoRA fine-tune (device_map=auto, r={qwen_lora_r}, BS={qwen_bs}, GA={qwen_ga}, epochs={N_EPOCHS_QWEN}, L=448)", flush=True)
                 m_t0 = time.perf_counter()
-                retain_qwen = (fold < n_splits - 1)
+                retain_qwen = False
                 val_qwen, test_qwen = train_qwen_lora_fold(
                     texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,

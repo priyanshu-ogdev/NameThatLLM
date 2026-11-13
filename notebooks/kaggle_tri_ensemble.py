@@ -1236,7 +1236,7 @@ class DualLinearClassifier(BaseEstimator):
     def fit(self, X, y, sample_weight=None):
         cw = None if sample_weight is not None else self.class_weight
         self.svc_1_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 0.75, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
-        self.svc_2_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 1.50, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
+        self.svc_2_ = LinearSVC(penalty="l2", loss="hinge", C=self.c_svc * 1.25, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
         self.ridge_1_ = RidgeClassifier(alpha=self.alpha_ridge * 0.6, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed)
         self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed + 7)
 

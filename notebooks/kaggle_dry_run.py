@@ -1236,7 +1236,7 @@ class DualLinearClassifier(BaseEstimator):
     def fit(self, X, y, sample_weight=None):
         cw = None if sample_weight is not None else self.class_weight
         self.svc_1_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 0.75, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed)
-        self.svc_2_ = LinearSVC(penalty="l2", loss="squared_hinge", C=self.c_svc * 1.50, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
+        self.svc_2_ = LinearSVC(penalty="l2", loss="hinge", C=self.c_svc * 1.25, class_weight=cw, dual="auto", tol=1e-3, max_iter=800, random_state=self.seed + 7)
         self.ridge_1_ = RidgeClassifier(alpha=self.alpha_ridge * 0.6, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed)
         self.ridge_2_ = RidgeClassifier(alpha=self.alpha_ridge * 1.5, solver="lsqr", tol=5e-3, class_weight=cw, random_state=self.seed + 7)
 
@@ -4997,7 +4997,8 @@ def run_dry_run_verifier():
         assert hasattr(clf, "svc_1_") and hasattr(clf, "svc_2_"), "DualLinearClassifier must define svc_1_ and svc_2_"
         assert hasattr(clf, "ridge_1_") and hasattr(clf, "ridge_2_"), "DualLinearClassifier must define ridge_1_ and ridge_2_"
         assert clf.svc_1_.C < clf.svc_2_.C, "svc_1_ and svc_2_ must span complementary low-C and high-C margins"
-        print(f"  [DualLinear Diversity] Complementary low/high margins: SVC (C={clf.svc_1_.C:.2f}/{clf.svc_2_.C:.2f}) + Ridge (alpha={clf.ridge_1_.alpha:.2f}/{clf.ridge_2_.alpha:.2f}) [OK]")
+        assert clf.svc_1_.loss == "squared_hinge" and clf.svc_2_.loss == "hinge", "svc_1_ and svc_2_ must span squared_hinge and hinge loss landscapes"
+        print(f"  [DualLinear Diversity] Complementary squared_hinge/hinge loss margins: SVC (C={clf.svc_1_.C:.2f}/{clf.svc_2_.C:.2f}) + Ridge (alpha={clf.ridge_1_.alpha:.2f}/{clf.ridge_2_.alpha:.2f}) [OK]")
 
         # IntraFamilyCliqueSpecialist with single-pass delta optimization
         clique_specialist = IntraFamilyCliqueSpecialist(alpha_ridge=1.0, beta_refine=0.25, seed=42)

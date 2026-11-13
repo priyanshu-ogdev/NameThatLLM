@@ -698,37 +698,41 @@ def find_topic_token_ids(token_id_sequences, groups, min_prompts: int = 2, speci
 
 
 def compute_same_prompt_sibling_repulsion(
-    representations: torch.Tensor,
+    logits: torch.Tensor,
     batch_groups: torch.Tensor | None,
     batch_labels: torch.Tensor,
-    margin: float = 0.15,
+    margin: float = 0.0,
     sample_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
-    Penalizes representations of responses to the SAME prompt that collapse together
-    despite originating from DIFFERENT model generators (author style separation).
+    Penalizes prompt-topic bias across responses to the SAME prompt that originate
+    from DIFFERENT model generators using within-prompt residual cross-entropy:
+    rel_logits = logits[i] - 0.5 * mean_{j in same_prompt, j!=i}(logits[j]).
+    Forces each model's residual attribution to isolate authorial style rather than shared prompt topic,
+    without forcing same-family siblings into conflicting representations.
     Runs 100% vectorized in PyTorch without CPU-GPU synchronization stalls.
     Optionally weights pairs by sample_weights (e.g. domain discounting for external data).
     """
-    B = representations.size(0)
+    B = logits.size(0)
     if B <= 1 or batch_groups is None:
-        return torch.zeros((), device=representations.device, dtype=representations.dtype)
+        return torch.zeros((), device=logits.device, dtype=logits.dtype)
 
     same_prompt = (batch_groups.unsqueeze(1) == batch_groups.unsqueeze(0))
     diff_model = (batch_labels.unsqueeze(1) != batch_labels.unsqueeze(0))
-    pair_mask = torch.triu(same_prompt & diff_model, diagonal=1)
+    sibling_mask = (same_prompt & diff_model).float()
+    sib_counts = sibling_mask.sum(dim=1, keepdim=True)
+    has_sib = (sib_counts.squeeze(1) >= 1.0)
+    if not torch.any(has_sib):
+        return torch.zeros((), device=logits.device, dtype=logits.dtype)
 
-    f_norm = F.normalize(representations.float(), p=2, dim=-1)
-    cos_sim = torch.mm(f_norm, f_norm.t())
-    viol = torch.clamp(cos_sim - margin, min=0.0).pow(2)
-    n_pairs = pair_mask.sum().clamp(min=1.0)
+    sib_mean_logits = torch.mm(sibling_mask, logits.float()) / sib_counts.clamp(min=1.0)
+    rel_logits = logits.float()[has_sib] - 0.5 * sib_mean_logits[has_sib]
+    targets = batch_labels[has_sib].to(device=logits.device, dtype=torch.long).clamp(0, logits.size(-1) - 1)
+    raw_ce = F.cross_entropy(rel_logits, targets, reduction="none")
     if sample_weights is not None:
-        sw = sample_weights.to(device=representations.device, dtype=torch.float32)
-        pair_weights = (sw.unsqueeze(1) * sw.unsqueeze(0)) * pair_mask.float()
-        repulsion = (viol * pair_weights).sum() / n_pairs
-    else:
-        repulsion = (viol * pair_mask.float()).sum() / n_pairs
-    return repulsion
+        sw = sample_weights[has_sib].to(device=raw_ce.device, dtype=raw_ce.dtype)
+        return (raw_ce * sw).mean()
+    return raw_ce.mean()
 
 
 def make_prompt_sibling_paired_indices(
@@ -1954,8 +1958,9 @@ class MultiSampleDropoutHead(nn.Module):
             self.last_branch_var = None
             return self.linear(x)
         branch_logits = torch.stack([self.linear(drop(x)) for drop in self.dropouts], dim=0)  # [5, B, C]
-        # Store inter-branch logit variance for self-consistency regularization (R-Drop style)
-        self.last_branch_var = torch.mean(torch.var(branch_logits.float(), dim=0))
+        # Store scale-invariant probability-simplex variance for self-consistency regularization (R-Drop style)
+        branch_probs = F.softmax(branch_logits.float(), dim=-1)
+        self.last_branch_var = torch.mean(torch.var(branch_probs, dim=0)) * float(branch_logits.size(-1))
         return torch.mean(branch_logits, dim=0)
 
 
@@ -2034,9 +2039,13 @@ class SpikeAndGapHierarchicalHead(nn.Module):
 
         mask = attention_mask.unsqueeze(-1).to(dtype=hidden_states.dtype)
         lengths = torch.clamp(mask.sum(dim=1), min=1.0)
+        B, T, D = hidden_states.shape
 
-        # 1. Mean Pooling (Global stylistic baseline)
-        h_mean = (hidden_states * mask).sum(dim=1) / lengths
+        # 1. Causal Position-Weighted Pooling (w_t = 0.3 + 0.7 * t/T down-weights prompt echo t < 32, focuses on accumulated context)
+        pos_weights = (0.3 + 0.7 * (torch.arange(T, device=target_dev, dtype=hidden_states.dtype) / max(T, 1))).unsqueeze(0).unsqueeze(-1)
+        causal_weights = mask * pos_weights
+        weight_sums = torch.clamp(causal_weights.sum(dim=1), min=1e-6)
+        h_mean = (hidden_states * causal_weights).sum(dim=1) / weight_sums
 
         # 2. Learned Anomaly-Spike Attention Pooling (isolates signature formatting & refusal spikes)
         gate_logits = self.spike_gate(hidden_states)
@@ -2049,10 +2058,15 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         h_max_spike, _ = masked_h.max(dim=1)
 
         # 4. Token-to-Token Transition Jerk (||h_t - h_{t-1}||_2 syntactic jump)
-        B, T, D = hidden_states.shape
         if T > 1:
             diffs = torch.norm(hidden_states[:, 1:, :] - hidden_states[:, :-1, :], p=2, dim=-1)
             valid_pairs = (attention_mask[:, 1:] * attention_mask[:, :-1]).to(dtype=hidden_states.dtype)
+            # Mask out artificial head-tail splice boundary jump when context is large (head-tail truncation)
+            if T >= 400:
+                splice_idx = (T // 2) - 1
+                if 0 <= splice_idx < valid_pairs.size(1):
+                    valid_pairs[:, splice_idx] = 0.0
+
             pair_lens = torch.clamp(valid_pairs.sum(dim=1, keepdim=True), min=1.0)
 
             gap_mean = (diffs * valid_pairs).sum(dim=1, keepdim=True) / pair_lens
@@ -4450,8 +4464,9 @@ class TransductivePromptCenterer:
     """
     Precomputes the top-K lexical prompt neighbor graph once from sparse TF-IDF (excluding dense style columns)
     and tunes the centering strength eta on OOF to guarantee monotonic accuracy gain before applying to test.
+    Applies competitive local z-score normalization across prompt cluster responses to isolate authorial style spikes.
     """
-    def __init__(self, k_neighbors: int = 17, sim_threshold: float = 0.22):
+    def __init__(self, k_neighbors: int = 17, sim_threshold: float = 0.16):
         self.k_neighbors = k_neighbors
         self.sim_threshold = sim_threshold
         self.nbr_lists_ = None
@@ -4459,6 +4474,11 @@ class TransductivePromptCenterer:
 
     def fit_graph(self, X_sparse):
         if X_sparse is None or X_sparse.shape[0] <= self.k_neighbors:
+            self.nbr_lists_ = None
+            self.nbr_weights_ = None
+            self._nbr_idx_mat = None
+            self._nbr_w_mat = None
+            self._has_nbrs = None
             return self
         try:
             # Exclude the last 145 dense stylometric columns so similarity reflects pure prompt topic
@@ -4523,14 +4543,19 @@ class TransductivePromptCenterer:
             valid_rows = np.isfinite(logits).all(axis=1)
             z_centered = logits.copy()
             z_centered[valid_rows] -= np.mean(logits[valid_rows], axis=1, keepdims=True)
-            out = z_centered.copy()
+            out = logits.copy()
 
             if getattr(self, "_nbr_idx_mat", None) is not None and np.all(valid_rows):
                 active = self._has_nbrs
                 if np.any(active):
                     nbr_z = z_centered[self._nbr_idx_mat[active]]              # [Na, k, C]
-                    nbr_mean = np.einsum("nkc,nk->nc", nbr_z, self._nbr_w_mat[active])
-                    out[active] = z_centered[active] - eta * nbr_mean
+                    nbr_w = self._nbr_w_mat[active]                             # [Na, k]
+                    nbr_mean = np.einsum("nkc,nk->nc", nbr_z, nbr_w)
+                    nbr_diff = nbr_z - nbr_mean[:, None, :]
+                    nbr_var = np.einsum("nkc,nk->nc", nbr_diff ** 2, nbr_w)
+                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05))
+                    z_local = (z_centered[active] - nbr_mean) / nbr_std
+                    out[active] = (1.0 - eta) * z_centered[active] + eta * z_local
                 return out
 
             for i in range(len(logits)):
@@ -4540,15 +4565,20 @@ class TransductivePromptCenterer:
                 v_mask = valid_rows[nbrs]
                 if np.sum(v_mask) >= 3:
                     w = self.nbr_weights_[i][v_mask]
-                    w = w / w.sum()
-                    nbr_mean = np.sum(z_centered[nbrs[v_mask]] * w, axis=0)
-                    out[i] = z_centered[i] - eta * nbr_mean
+                    w = w / max(float(w.sum()), 1e-12)
+                    nz = z_centered[nbrs[v_mask]]
+                    nbr_mean = np.sum(nz * w, axis=0)
+                    nbr_diff = nz - nbr_mean[None, :]
+                    nbr_var = np.sum((nbr_diff ** 2) * w, axis=0)
+                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05))
+                    z_local = (z_centered[i] - nbr_mean) / nbr_std
+                    out[i] = (1.0 - eta) * z_centered[i] + eta * z_local
             return out
         except Exception as e:
             print(f"  [Prompt Centerer] Transform notice: {e}", flush=True)
             return logits
 
-    def optimize_eta(self, oof_logits: np.ndarray | list, y_true_int: np.ndarray, candidates=(0.0, 0.06, 0.12, 0.18, 0.25)) -> float:
+    def optimize_eta(self, oof_logits: np.ndarray | list, y_true_int: np.ndarray, candidates=(0.0, 0.10, 0.20, 0.35, 0.50, 0.65, 0.80, 0.90)) -> float:
         """
         Tunes eta across candidate values to maximize out-of-fold balanced accuracy.
         Candidate 0.0 guarantees monotonic non-decreasing performance.
@@ -5508,10 +5538,10 @@ def run_dry_run_verifier():
     print("  Dispersion-Matched Test Bagging verified [OK]")
 
     mock_sparse_raw = sp.csr_matrix(np.random.randn(10, 100))
-    centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22)
+    centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.16)
     centerer.fit_graph(mock_sparse_raw)
     opt_eta = centerer.optimize_eta([mock_svm_m[:10]], mock_y_int[:10])
-    assert 0.0 <= opt_eta <= 0.25, "Optimal eta out of candidate bounds"
+    assert 0.0 <= opt_eta <= 0.90, "Optimal eta out of candidate bounds"
     centered_logits = centerer.transform(bagged_test, eta=opt_eta)
     assert centered_logits.shape == bagged_test.shape, "Centered logits shape mismatch"
     print(f"  Transductive Prompt Centerer verified [OK] (graph fit & monotonic OOF eta={opt_eta:.2f})")
@@ -5532,7 +5562,7 @@ def run_dry_run_verifier():
 
     # 2. Transductive prompt centering on test
     sim_sparse_te = sp.csr_matrix(rng_mock.randn(n_mock_te, 100))
-    sim_centerer = TransductivePromptCenterer(k_neighbors=10, sim_threshold=0.20).fit_graph(sim_sparse_te)
+    sim_centerer = TransductivePromptCenterer(k_neighbors=10, sim_threshold=0.16).fit_graph(sim_sparse_te)
     sim_test_svm = sim_centerer.transform(sim_test_svm, eta=0.12)
     sim_test_deb = sim_centerer.transform(sim_test_deb, eta=0.12)
     sim_test_qwen = sim_centerer.transform(sim_test_qwen, eta=0.12)

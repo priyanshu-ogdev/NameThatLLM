@@ -655,10 +655,10 @@ def run_dry_run_verifier():
     print("  Dispersion-Matched Test Bagging verified [OK]")
 
     mock_sparse_raw = sp.csr_matrix(np.random.randn(10, 100))
-    centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.22)
+    centerer = TransductivePromptCenterer(k_neighbors=17, sim_threshold=0.16)
     centerer.fit_graph(mock_sparse_raw)
     opt_eta = centerer.optimize_eta([mock_svm_m[:10]], mock_y_int[:10])
-    assert 0.0 <= opt_eta <= 0.25, "Optimal eta out of candidate bounds"
+    assert 0.0 <= opt_eta <= 0.90, "Optimal eta out of candidate bounds"
     centered_logits = centerer.transform(bagged_test, eta=opt_eta)
     assert centered_logits.shape == bagged_test.shape, "Centered logits shape mismatch"
     print(f"  Transductive Prompt Centerer verified [OK] (graph fit & monotonic OOF eta={opt_eta:.2f})")
@@ -679,7 +679,7 @@ def run_dry_run_verifier():
 
     # 2. Transductive prompt centering on test
     sim_sparse_te = sp.csr_matrix(rng_mock.randn(n_mock_te, 100))
-    sim_centerer = TransductivePromptCenterer(k_neighbors=10, sim_threshold=0.20).fit_graph(sim_sparse_te)
+    sim_centerer = TransductivePromptCenterer(k_neighbors=10, sim_threshold=0.16).fit_graph(sim_sparse_te)
     sim_test_svm = sim_centerer.transform(sim_test_svm, eta=0.12)
     sim_test_deb = sim_centerer.transform(sim_test_deb, eta=0.12)
     sim_test_qwen = sim_centerer.transform(sim_test_qwen, eta=0.12)

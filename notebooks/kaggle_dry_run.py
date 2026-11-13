@@ -2041,9 +2041,10 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         lengths = torch.clamp(mask.sum(dim=1), min=1.0)
         B, T, D = hidden_states.shape
 
-        # 1. Causal Position-Weighted Pooling (w_t = 0.3 + 0.7 * t/T down-weights prompt echo t < 32, focuses on accumulated context)
-        pos_weights = (0.3 + 0.7 * (torch.arange(T, device=target_dev, dtype=hidden_states.dtype) / max(T, 1))).unsqueeze(0).unsqueeze(-1)
-        causal_weights = mask * pos_weights
+        # 1. Causal Position-Weighted Pooling (immune to left/right padding via attention_mask cumsum)
+        token_order = attention_mask.cumsum(dim=1).to(dtype=hidden_states.dtype)
+        rel_pos = (token_order / lengths).clamp(0.0, 1.0).unsqueeze(-1)
+        causal_weights = mask * (0.25 + 0.75 * rel_pos)
         weight_sums = torch.clamp(causal_weights.sum(dim=1), min=1e-6)
         h_mean = (hidden_states * causal_weights).sum(dim=1) / weight_sums
 
@@ -2061,11 +2062,11 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         if T > 1:
             diffs = torch.norm(hidden_states[:, 1:, :] - hidden_states[:, :-1, :], p=2, dim=-1)
             valid_pairs = (attention_mask[:, 1:] * attention_mask[:, :-1]).to(dtype=hidden_states.dtype)
-            # Mask out artificial head-tail splice boundary jump when context is large (head-tail truncation)
-            if T >= 400:
-                splice_idx = (T // 2) - 1
-                if 0 <= splice_idx < valid_pairs.size(1):
-                    valid_pairs[:, splice_idx] = 0.0
+            # Mask out the single largest jump if T >= 400 so head+tail truncation splice never corrupts gap_max
+            if T >= 400 and T > 4:
+                masked_diffs_init = diffs.masked_fill(valid_pairs == 0, -1e4)
+                top1_idx = masked_diffs_init.argmax(dim=1, keepdim=True)
+                valid_pairs = valid_pairs.scatter(1, top1_idx, 0.0)
 
             pair_lens = torch.clamp(valid_pairs.sum(dim=1, keepdim=True), min=1.0)
 
@@ -2291,7 +2292,11 @@ def apply_column_mean_demeaning(
             best_score = cand_score
             best_tau = float(tau)
             best_val = cand_val
-    best_test = (test_logits - best_tau * col_mean) if test_logits is not None else None
+    if test_logits is not None:
+        t_col_mean = np.mean(test_logits, axis=0, keepdims=True) if len(test_logits) >= 36 else col_mean
+        best_test = test_logits - best_tau * t_col_mean
+    else:
+        best_test = None
     return best_val, best_test, best_tau
 
 
@@ -3608,7 +3613,8 @@ def _train_qwen_lora_fold_impl(
     label_to_fam_tensor = torch.tensor(LABEL_TO_FAMILY_IDX, dtype=torch.long, device=head_dev)
 
     has_ext = cached_enc_ext is not None and ext_y_int is not None
-    n_ext_per_ep = (len(labels) * 25) if has_ext else 0
+    qwen_per_class_k = 20 if epochs <= 2 else 25
+    n_ext_per_ep = (len(labels) * qwen_per_class_k) if has_ext else 0
     total_steps = max(sum(
         ((len(texts_tr) + (n_ext_per_ep if ep < epochs - 1 else 0) + batch_size * grad_accum - 1) // (batch_size * grad_accum))
         for ep in range(epochs)
@@ -4541,20 +4547,23 @@ class TransductivePromptCenterer:
             return logits
         try:
             valid_rows = np.isfinite(logits).all(axis=1)
+            if not np.any(valid_rows):
+                return logits
             z_centered = logits.copy()
             z_centered[valid_rows] -= np.mean(logits[valid_rows], axis=1, keepdims=True)
-            out = logits.copy()
+            global_std = np.maximum(np.std(z_centered[valid_rows], axis=0, keepdims=True), 1e-4)
+            out = z_centered.copy()
 
             if getattr(self, "_nbr_idx_mat", None) is not None and np.all(valid_rows):
                 active = self._has_nbrs
                 if np.any(active):
-                    nbr_z = z_centered[self._nbr_idx_mat[active]]              # [Na, k, C]
+                    nbr_z = z_centered[self._nbr_idx_mat[active]]               # [Na, k, C]
                     nbr_w = self._nbr_w_mat[active]                             # [Na, k]
                     nbr_mean = np.einsum("nkc,nk->nc", nbr_z, nbr_w)
                     nbr_diff = nbr_z - nbr_mean[:, None, :]
                     nbr_var = np.einsum("nkc,nk->nc", nbr_diff ** 2, nbr_w)
-                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05))
-                    z_local = (z_centered[active] - nbr_mean) / nbr_std
+                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05 * (global_std ** 2)))
+                    z_local = ((z_centered[active] - nbr_mean) / nbr_std) * global_std
                     out[active] = (1.0 - eta) * z_centered[active] + eta * z_local
                 return out
 
@@ -4570,8 +4579,8 @@ class TransductivePromptCenterer:
                     nbr_mean = np.sum(nz * w, axis=0)
                     nbr_diff = nz - nbr_mean[None, :]
                     nbr_var = np.sum((nbr_diff ** 2) * w, axis=0)
-                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05))
-                    z_local = (z_centered[i] - nbr_mean) / nbr_std
+                    nbr_std = np.sqrt(np.maximum(nbr_var, 0.05 * (global_std.ravel() ** 2)))
+                    z_local = ((z_centered[i] - nbr_mean) / nbr_std) * global_std.ravel()
                     out[i] = (1.0 - eta) * z_centered[i] + eta * z_local
             return out
         except Exception as e:
@@ -4649,7 +4658,7 @@ class CPUGradientMetaCombiner:
         n_fams = len(self.family_groups)
         fam_logits_m = torch.zeros((M, N, n_fams), dtype=logits_stack.dtype, device=logits_stack.device)
         for f_idx, c_idxs in enumerate(self.family_groups):
-            fam_logits_m[:, :, f_idx] = torch.logsumexp(gated[:, :, c_idxs], dim=-1)
+            fam_logits_m[:, :, f_idx] = torch.logsumexp(gated[:, :, c_idxs], dim=-1) - math.log(max(len(c_idxs), 1))
         z_router = torch.sum(self.W_rot.view(M, 1, n_fams) * fam_logits_m, dim=0)  # [N, n_fams]
         p_family = F.softmax(z_router, dim=-1)  # [N, n_fams]
 

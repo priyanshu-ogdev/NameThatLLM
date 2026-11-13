@@ -4604,7 +4604,7 @@ class TransductivePromptCenterer:
                 z_centered[valid_rows] -= np.mean(z_centered[valid_rows], axis=0, keepdims=True)
 
             global_std = np.maximum(np.std(z_centered[valid_rows], axis=0, keepdims=True), 1e-4)
-            out = logits.copy()
+            out = z_centered.copy()
 
             if getattr(self, "_nbr_idx_mat", None) is not None and np.all(valid_rows):
                 active = self._has_nbrs

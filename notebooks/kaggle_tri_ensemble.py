@@ -401,6 +401,29 @@ def align_external_dense_moments(
     return (((V_ext - mu_ext) / std_ext) * std_comp + mu_comp).astype(V_comp.dtype)
 
 
+def sample_balanced_external_indices(ext_labels: np.ndarray, size: int, seed: int = 42) -> np.ndarray:
+    """
+    Samples exactly `size` indices from the external corpus with balanced class representation
+    across all 18 classes (ensuring equal class distribution and zero prior skew in neural batches).
+    """
+    rng = np.random.RandomState(seed)
+    n_classes = len(LABELS)
+    per_class = max(1, size // n_classes)
+    selected = []
+    for lab in LABELS:
+        c_idxs = np.where(ext_labels == lab)[0]
+        if len(c_idxs) > 0:
+            take = min(per_class, len(c_idxs))
+            selected.extend(rng.choice(c_idxs, size=take, replace=False).tolist())
+    if len(selected) < size:
+        remaining = list(set(range(len(ext_labels))) - set(selected))
+        if remaining:
+            needed = min(size - len(selected), len(remaining))
+            selected.extend(rng.choice(remaining, size=needed, replace=False).tolist())
+    rng.shuffle(selected)
+    return np.array(selected[:size], dtype=np.int64)
+
+
 def build_mass_balanced_external_corpus(
     comp_train_df: pd.DataFrame,
     ext_wide_path: str | Path,
@@ -1170,7 +1193,7 @@ class DenseStylometricClassifier(BaseEstimator):
     LogisticRegression classifier with balanced class weights to produce calibrated probabilities.
     Supports sample_weight with automatic class_weight=None override to prevent double-balancing.
     """
-    def __init__(self, c=0.2, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
+    def __init__(self, c=0.015, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
         self.c = c
         self.seed = seed
         self.class_weight = class_weight
@@ -2897,8 +2920,8 @@ def _train_transformer_fold_impl(
             best_val_logits = val_logits
             best_state = {k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names}
 
-        # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 0):
+        # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs (>= 4 epochs only)
+        if epochs >= 4 and epoch >= max(epochs - 2, 1):
             epoch_states.append({k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names and v.is_floating_point()})
 
         if stop_early:
@@ -3027,10 +3050,11 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
 def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels, group_ids_tr=None, **kwargs):
     kwargs.setdefault("batch_size", 20)
     kwargs.setdefault("grad_accum", 1)
-    kwargs.setdefault("epochs", 5)
-    kwargs.setdefault("lr_backbone", 2.2e-5)
+    kwargs.setdefault("epochs", 3)
+    kwargs.setdefault("lr_backbone", 9.5e-6)
     kwargs.setdefault("lr_head", 1.2e-4)
-    kwargs.setdefault("layer_decay", 0.85)
+    kwargs.setdefault("layer_decay", 0.70)
+    kwargs.setdefault("n_frozen_bottom_layers", 8)
     kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
@@ -3487,8 +3511,8 @@ def _train_qwen_lora_fold_impl(
             best_lora_state = {k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k}
             best_head_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
 
-        # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 0):
+        # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs (>= 4 epochs only)
+        if epochs >= 4 and epoch >= max(epochs - 2, 1):
             epoch_lora_states.append({k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k and v.is_floating_point()})
             epoch_head_states.append({k: v.cpu().clone() for k, v in head.state_dict().items() if v.is_floating_point()})
 
@@ -4025,15 +4049,15 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
 def optimize_cpu_subblend(sparse_probs: np.ndarray, dense_probs: np.ndarray, y_true_int: np.ndarray) -> float:
     """
     Find optimal alpha such that alpha*sparse + (1-alpha)*dense maximizes OOF balanced accuracy.
-    Searches over alpha in [0.5, 1.0] anchored at pure sparse (1.0) to preserve sparse dominance.
+    Searches over alpha in [0.45, 0.90] anchored at 0.85 to ensure 10%–55% stylometric signal
+    and prevent pure sparse collapse.
     """
     valid = np.isfinite(sparse_probs).all(axis=1) & np.isfinite(dense_probs).all(axis=1)
     if np.sum(valid) < 10:
         return 0.85
-    base_score = balanced_accuracy_score(y_true_int[valid], sparse_probs[valid].argmax(axis=1))
-    best_score = base_score
-    best_alpha = 1.0
-    for alpha in np.arange(0.95, 0.45, -0.05):
+    best_score = -1.0
+    best_alpha = 0.85
+    for alpha in np.arange(0.90, 0.45, -0.05):
         blend = alpha * sparse_probs[valid] + (1.0 - alpha) * dense_probs[valid]
         score = balanced_accuracy_score(y_true_int[valid], blend.argmax(axis=1))
         if score > best_score:
@@ -4565,7 +4589,7 @@ def run_quad_ensemble():
     print("=" * 65, flush=True)
     token_caches = precompute_token_caches(
         raw_texts_tr, raw_texts_te, deberta_dir, bge_dir, qwen_dir,
-        raw_texts_ext=None,
+        raw_texts_ext=ext_texts if ext_df is not None else None,
         max_length=448,
     )
     print(flush=True)
@@ -4641,8 +4665,8 @@ def run_quad_ensemble():
     print("=" * 65, flush=True)
 
     is_qwen3 = qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower())
-    N_EPOCHS_DEB = 4
-    N_EPOCHS_BGE = 5
+    N_EPOCHS_DEB = 3
+    N_EPOCHS_BGE = 3
     N_EPOCHS_QWEN = 2 if is_qwen3 else 3
     MAX_WALLCLOCK_HOURS = 8.2
     SAFETY_MARGIN_SEC = 1200  # 20 min buffer for final bagging, Sinkhorn, and submission
@@ -4669,11 +4693,56 @@ def run_quad_ensemble():
         y_tr_str = y_true[tr_idx].tolist()
         y_va_str = y_true[va_idx].tolist()
 
-        # Slice precomputed token caches from RAM in 0.001s
+        # Neural data balancing: sample fold-stratified external subsets
+        ext_labels_arr = ext_df["model"].to_numpy() if ext_df is not None else None
+        if ext_labels_arr is not None:
+            # 1:1 balanced injection for DeBERTa and BGE
+            n_comp_tr = len(tr_idx)
+            ext_sample_idx = sample_balanced_external_indices(ext_labels_arr, size=n_comp_tr, seed=42 + fold * 13)
+            ext_texts_sampled = [ext_texts[i] for i in ext_sample_idx]
+            ext_labels_sampled = ext_labels_arr[ext_sample_idx].tolist()
+            texts_tr_deb = texts_tr + ext_texts_sampled
+            y_tr_deb = y_tr_str + ext_labels_sampled
+            texts_tr_bge = texts_tr + ext_texts_sampled
+            y_tr_bge = y_tr_str + ext_labels_sampled
+            ext_groups = np.arange(len(ext_sample_idx), dtype=np.int64) + 999000
+            group_ids_tr_deb = np.concatenate([group_ids[tr_idx], ext_groups])
+            group_ids_tr_bge = np.concatenate([group_ids[tr_idx], ext_groups])
+
+            # Budget-capped balanced injection for Qwen (~800 samples) to strictly respect the 9h envelope
+            n_qwen_ext = min(len(tr_idx) // 2, 800)
+            ext_sample_idx_qwen = sample_balanced_external_indices(ext_labels_arr, size=n_qwen_ext, seed=42 + fold * 17)
+            ext_texts_qwen = [ext_texts[i] for i in ext_sample_idx_qwen]
+            ext_labels_qwen = ext_labels_arr[ext_sample_idx_qwen].tolist()
+            texts_tr_qwen = texts_tr + ext_texts_qwen
+            y_tr_qwen = y_tr_str + ext_labels_qwen
+            ext_groups_qwen = np.arange(len(ext_sample_idx_qwen), dtype=np.int64) + 999000
+            group_ids_tr_qwen = np.concatenate([group_ids[tr_idx], ext_groups_qwen])
+            print(f"  [Neural Data Injection] DeBERTa/BGE: {len(texts_tr)} comp + {len(ext_texts_sampled)} ext = {len(texts_tr_deb)} | Qwen: {len(texts_tr)} comp + {len(ext_texts_qwen)} ext = {len(texts_tr_qwen)}", flush=True)
+        else:
+            ext_sample_idx = None
+            ext_sample_idx_qwen = None
+            texts_tr_deb = texts_tr
+            y_tr_deb = y_tr_str
+            group_ids_tr_deb = group_ids[tr_idx]
+            texts_tr_bge = texts_tr
+            y_tr_bge = y_tr_str
+            group_ids_tr_bge = group_ids[tr_idx]
+            texts_tr_qwen = texts_tr
+            y_tr_qwen = y_tr_str
+            group_ids_tr_qwen = group_ids[tr_idx]
+
+        # Slice precomputed token caches from RAM in 0.001s (merging external caches when active)
         deb_cache = token_caches.get("deberta")
         deb_kw = {}
         if deb_cache is not None:
-            deb_kw["cached_enc_tr"] = {k: [deb_cache["tr"][k][i] for i in tr_idx] for k in deb_cache["tr"]}
+            if deb_cache.get("ext") is not None and ext_sample_idx is not None:
+                deb_kw["cached_enc_tr"] = {
+                    k: [deb_cache["tr"][k][i] for i in tr_idx] + [deb_cache["ext"][k][i] for i in ext_sample_idx]
+                    for k in deb_cache["tr"]
+                }
+            else:
+                deb_kw["cached_enc_tr"] = {k: [deb_cache["tr"][k][i] for i in tr_idx] for k in deb_cache["tr"]}
             deb_kw["cached_enc_va"] = {k: [deb_cache["tr"][k][i] for i in va_idx] for k in deb_cache["tr"]}
             deb_kw["cached_enc_te"] = deb_cache["te"]
             deb_kw["cached_enc_te_tta"] = deb_cache.get("te_tta")
@@ -4682,7 +4751,13 @@ def run_quad_ensemble():
         bge_cache = token_caches.get("bge")
         bge_kw = {}
         if bge_cache is not None:
-            bge_kw["cached_enc_tr"] = {k: [bge_cache["tr"][k][i] for i in tr_idx] for k in bge_cache["tr"]}
+            if bge_cache.get("ext") is not None and ext_sample_idx is not None:
+                bge_kw["cached_enc_tr"] = {
+                    k: [bge_cache["tr"][k][i] for i in tr_idx] + [bge_cache["ext"][k][i] for i in ext_sample_idx]
+                    for k in bge_cache["tr"]
+                }
+            else:
+                bge_kw["cached_enc_tr"] = {k: [bge_cache["tr"][k][i] for i in tr_idx] for k in bge_cache["tr"]}
             bge_kw["cached_enc_va"] = {k: [bge_cache["tr"][k][i] for i in va_idx] for k in bge_cache["tr"]}
             bge_kw["cached_enc_te"] = bge_cache["te"]
             bge_kw["cached_enc_te_tta"] = bge_cache.get("te_tta")
@@ -4691,7 +4766,13 @@ def run_quad_ensemble():
         qwen_cache = token_caches.get("qwen")
         qwen_kw = {}
         if qwen_cache is not None:
-            qwen_kw["cached_enc_tr"] = {k: [qwen_cache["tr"][k][i] for i in tr_idx] for k in qwen_cache["tr"]}
+            if qwen_cache.get("ext") is not None and ext_sample_idx_qwen is not None:
+                qwen_kw["cached_enc_tr"] = {
+                    k: [qwen_cache["tr"][k][i] for i in tr_idx] + [qwen_cache["ext"][k][i] for i in ext_sample_idx_qwen]
+                    for k in qwen_cache["tr"]
+                }
+            else:
+                qwen_kw["cached_enc_tr"] = {k: [qwen_cache["tr"][k][i] for i in tr_idx] for k in qwen_cache["tr"]}
             qwen_kw["cached_enc_va"] = {k: [qwen_cache["tr"][k][i] for i in va_idx] for k in qwen_cache["tr"]}
             qwen_kw["cached_enc_te"] = qwen_cache["te"]
             qwen_kw["cached_enc_te_tta"] = qwen_cache.get("te_tta")
@@ -4708,13 +4789,13 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] DeBERTa-v3-large full fine-tune ({deb_dev}, BS=16, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_deb, test_deb = train_deberta_fold(
-                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
+                    texts_tr_deb, y_tr_deb, texts_va, y_va_str, texts_test,
                     deberta_dir, LABELS,
                     device=deb_dev,
                     batch_size=16, grad_accum=1, max_length=448,
                     epochs=N_EPOCHS_DEB, lr_backbone=1.8e-5, lr_head=1.5e-4, layer_decay=0.90, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids[tr_idx],
+                    group_ids_tr=group_ids_tr_deb,
                     **deb_kw,
                 )
                 if val_deb is not None and np.all(np.isfinite(val_deb)):
@@ -4744,13 +4825,13 @@ def run_quad_ensemble():
                 print(f"\n[Fold {fold+1}] BGE-large full fine-tune ({bge_dev}, BS=20, GA=1, L=448, ckpt=ON)", flush=True)
                 m_t0 = time.perf_counter()
                 val_bge, test_bge = train_bge_fold(
-                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
+                    texts_tr_bge, y_tr_bge, texts_va, y_va_str, texts_test,
                     bge_dir, LABELS,
                     device=bge_dev,
                     batch_size=20, grad_accum=1, max_length=448,
-                    epochs=N_EPOCHS_BGE, lr_backbone=2.0e-5, lr_head=1.2e-4, layer_decay=0.85, enable_grad_checkpointing=True,
+                    epochs=N_EPOCHS_BGE, lr_backbone=9.5e-6, lr_head=1.2e-4, layer_decay=0.70, n_frozen_bottom_layers=8, enable_grad_checkpointing=True,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids[tr_idx],
+                    group_ids_tr=group_ids_tr_bge,
                     **bge_kw,
                 )
                 if val_bge is not None and np.all(np.isfinite(val_bge)):
@@ -4786,12 +4867,12 @@ def run_quad_ensemble():
                 m_t0 = time.perf_counter()
                 retain_qwen = False
                 val_qwen, test_qwen = train_qwen_lora_fold(
-                    texts_tr, y_tr_str, texts_va, y_va_str, texts_test,
+                    texts_tr_qwen, y_tr_qwen, texts_va, y_va_str, texts_test,
                     qwen_dir, LABELS,
                     batch_size=qwen_bs, grad_accum=qwen_ga, max_length=448, epochs=N_EPOCHS_QWEN,
                     lr_lora=qwen_lr_lora, lr_head=qwen_lr_head, lora_r=48, lora_alpha=96, lora_dropout=0.08,
                     deadline=pipeline_deadline,
-                    group_ids_tr=group_ids[tr_idx],
+                    group_ids_tr=group_ids_tr_qwen,
                     retain_backbone=retain_qwen,
                     **qwen_kw,
                 )
@@ -4875,7 +4956,7 @@ def run_quad_ensemble():
                 test_sparse_m = clique_specialist.refine_margins(test_sparse_m, X_te_fold, beta=opt_beta)
 
                 # Dense stylometric calibrated stream (strictly leak-free fold projection)
-                dense_clf = DenseStylometricClassifier(c=0.2, seed=42 + fold, canonical_labels=LABELS)
+                dense_clf = DenseStylometricClassifier(c=0.015, seed=42 + fold, canonical_labels=LABELS)
                 if w_tr_comb is not None:
                     dense_clf.fit(V_dense_tr_comb, y_tr_comb, sample_weight=w_tr_comb)
                 else:

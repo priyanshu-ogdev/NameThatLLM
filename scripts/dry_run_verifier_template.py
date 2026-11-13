@@ -155,8 +155,8 @@ def run_dry_run_verifier():
     N_COMB_FOLD = N_TRAIN_FOLD + N_EXT
 
     is_qwen3 = bool(qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()))
-    N_EPOCHS_DEB = 4
-    N_EPOCHS_BGE = 5
+    N_EPOCHS_DEB = 3
+    N_EPOCHS_BGE = 3
     N_EPOCHS_QWEN = 2 if is_qwen3 else 3
 
     # ── CHECK 3: DeBERTa-v3-large Mini-Training & Throughput Benchmark ──
@@ -534,7 +534,7 @@ def run_dry_run_verifier():
         V_dense_va_proj = subspace_proj.transform(V_dense_va)
         V_dense_te_proj = subspace_proj.transform(V_dense_te)
 
-        dense_clf = DenseStylometricClassifier(c=0.2, seed=42, canonical_labels=LABELS)
+        dense_clf = DenseStylometricClassifier(c=0.015, seed=42, canonical_labels=LABELS)
         dense_clf.fit(V_dense_tr_proj, y_tr_comb, sample_weight=w_tr_comb)
         p_dense_va = dense_clf.predict_proba(V_dense_va_proj)
         p_dense_te = dense_clf.predict_proba(V_dense_te_proj)
@@ -889,13 +889,13 @@ def run_dry_run_verifier():
     print("  MODEL COMPONENT               THROUGHPUT    5-FOLD TIME     HOURLY SHARE")
     print("-" * 74)
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
-    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
-    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
+    print(f"  2. DeBERTa-v3-large FT (3ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
+    print(f"  3. BGE-large-en-v1.5 FT (3ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
     print(f"     -> Sequential Transformer Stage:        {t_transformers:5.1f} min ({t_transformers/60:4.2f}h) [{seq_desc}]")
     print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
-    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
+    print(f"  ACTIVE SCHEDULE (3/3/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
     print(f"  REFERENCE (Qwen 3ep / 2ep projections):        {total_est_hours_3ep:4.2f}h (3ep) / {total_est_hours_2ep:4.2f}h (2ep)")
     print("-" * 74)
     print("           PROJECTED SCORES & ACCURACY BENCHMARK MATRIX           ")
@@ -942,7 +942,7 @@ def run_dry_run_verifier():
     print("  RAM VERDICT: [GREEN] PASSED (Peak ~10.5 GB | Dry run peak ~5.5 GB | Zero OOM Risk)")
     print("-" * 74)
     if total_est_hours_active <= 8.5:
-        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
+        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 3/3/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
     else:
         print("  >>> VERDICT: [AMBER] CAUTION (Projected runtime approaches budget limit) <<<")
     print("  >>> COMPETITION TARGET (>0.70 Macro Balanced Accuracy) CERTIFIED REACHABLE <<<")

@@ -401,6 +401,29 @@ def align_external_dense_moments(
     return (((V_ext - mu_ext) / std_ext) * std_comp + mu_comp).astype(V_comp.dtype)
 
 
+def sample_balanced_external_indices(ext_labels: np.ndarray, size: int, seed: int = 42) -> np.ndarray:
+    """
+    Samples exactly `size` indices from the external corpus with balanced class representation
+    across all 18 classes (ensuring equal class distribution and zero prior skew in neural batches).
+    """
+    rng = np.random.RandomState(seed)
+    n_classes = len(LABELS)
+    per_class = max(1, size // n_classes)
+    selected = []
+    for lab in LABELS:
+        c_idxs = np.where(ext_labels == lab)[0]
+        if len(c_idxs) > 0:
+            take = min(per_class, len(c_idxs))
+            selected.extend(rng.choice(c_idxs, size=take, replace=False).tolist())
+    if len(selected) < size:
+        remaining = list(set(range(len(ext_labels))) - set(selected))
+        if remaining:
+            needed = min(size - len(selected), len(remaining))
+            selected.extend(rng.choice(remaining, size=needed, replace=False).tolist())
+    rng.shuffle(selected)
+    return np.array(selected[:size], dtype=np.int64)
+
+
 def build_mass_balanced_external_corpus(
     comp_train_df: pd.DataFrame,
     ext_wide_path: str | Path,
@@ -1170,7 +1193,7 @@ class DenseStylometricClassifier(BaseEstimator):
     LogisticRegression classifier with balanced class weights to produce calibrated probabilities.
     Supports sample_weight with automatic class_weight=None override to prevent double-balancing.
     """
-    def __init__(self, c=0.2, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
+    def __init__(self, c=0.015, seed=42, class_weight="balanced", canonical_labels=None, use_kernel_expander=True):
         self.c = c
         self.seed = seed
         self.class_weight = class_weight
@@ -2897,8 +2920,8 @@ def _train_transformer_fold_impl(
             best_val_logits = val_logits
             best_state = {k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names}
 
-        # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 0):
+        # Collect trainable states for Stochastic Weight Averaging (SWA) over the final converged epochs (>= 4 epochs only)
+        if epochs >= 4 and epoch >= max(epochs - 2, 1):
             epoch_states.append({k: v.detach().cpu().clone() for k, v in model.named_parameters() if k in trainable_names and v.is_floating_point()})
 
         if stop_early:
@@ -3027,10 +3050,11 @@ def train_deberta_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_d
 def train_bge_fold(texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels, group_ids_tr=None, **kwargs):
     kwargs.setdefault("batch_size", 20)
     kwargs.setdefault("grad_accum", 1)
-    kwargs.setdefault("epochs", 5)
-    kwargs.setdefault("lr_backbone", 2.2e-5)
+    kwargs.setdefault("epochs", 3)
+    kwargs.setdefault("lr_backbone", 9.5e-6)
     kwargs.setdefault("lr_head", 1.2e-4)
-    kwargs.setdefault("layer_decay", 0.85)
+    kwargs.setdefault("layer_decay", 0.70)
+    kwargs.setdefault("n_frozen_bottom_layers", 8)
     kwargs.setdefault("enable_grad_checkpointing", True)
     return train_transformer_fold(
         "BGE FT", texts_tr, y_tr_str, texts_va, y_va_str, texts_te, model_dir, labels,
@@ -3487,8 +3511,8 @@ def _train_qwen_lora_fold_impl(
             best_lora_state = {k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k}
             best_head_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
 
-        # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs
-        if epoch >= max(epochs - 2, 0):
+        # Collect states for Stochastic Weight Averaging (SWA) over the final converged epochs (>= 4 epochs only)
+        if epochs >= 4 and epoch >= max(epochs - 2, 1):
             epoch_lora_states.append({k: v.detach().cpu().clone() for k, v in backbone.named_parameters() if "lora_" in k and v.is_floating_point()})
             epoch_head_states.append({k: v.cpu().clone() for k, v in head.state_dict().items() if v.is_floating_point()})
 
@@ -4025,15 +4049,15 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
 def optimize_cpu_subblend(sparse_probs: np.ndarray, dense_probs: np.ndarray, y_true_int: np.ndarray) -> float:
     """
     Find optimal alpha such that alpha*sparse + (1-alpha)*dense maximizes OOF balanced accuracy.
-    Searches over alpha in [0.5, 1.0] anchored at pure sparse (1.0) to preserve sparse dominance.
+    Searches over alpha in [0.45, 0.90] anchored at 0.85 to ensure 10%–55% stylometric signal
+    and prevent pure sparse collapse.
     """
     valid = np.isfinite(sparse_probs).all(axis=1) & np.isfinite(dense_probs).all(axis=1)
     if np.sum(valid) < 10:
         return 0.85
-    base_score = balanced_accuracy_score(y_true_int[valid], sparse_probs[valid].argmax(axis=1))
-    best_score = base_score
-    best_alpha = 1.0
-    for alpha in np.arange(0.95, 0.45, -0.05):
+    best_score = -1.0
+    best_alpha = 0.85
+    for alpha in np.arange(0.90, 0.45, -0.05):
         blend = alpha * sparse_probs[valid] + (1.0 - alpha) * dense_probs[valid]
         score = balanced_accuracy_score(y_true_int[valid], blend.argmax(axis=1))
         if score > best_score:
@@ -4637,8 +4661,8 @@ def run_dry_run_verifier():
     N_COMB_FOLD = N_TRAIN_FOLD + N_EXT
 
     is_qwen3 = bool(qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()))
-    N_EPOCHS_DEB = 4
-    N_EPOCHS_BGE = 5
+    N_EPOCHS_DEB = 3
+    N_EPOCHS_BGE = 3
     N_EPOCHS_QWEN = 2 if is_qwen3 else 3
 
     # ── CHECK 3: DeBERTa-v3-large Mini-Training & Throughput Benchmark ──
@@ -5016,7 +5040,7 @@ def run_dry_run_verifier():
         V_dense_va_proj = subspace_proj.transform(V_dense_va)
         V_dense_te_proj = subspace_proj.transform(V_dense_te)
 
-        dense_clf = DenseStylometricClassifier(c=0.2, seed=42, canonical_labels=LABELS)
+        dense_clf = DenseStylometricClassifier(c=0.015, seed=42, canonical_labels=LABELS)
         dense_clf.fit(V_dense_tr_proj, y_tr_comb, sample_weight=w_tr_comb)
         p_dense_va = dense_clf.predict_proba(V_dense_va_proj)
         p_dense_te = dense_clf.predict_proba(V_dense_te_proj)
@@ -5371,13 +5395,13 @@ def run_dry_run_verifier():
     print("  MODEL COMPONENT               THROUGHPUT    5-FOLD TIME     HOURLY SHARE")
     print("-" * 74)
     print(f"  1. CPU Dual-Linear + Spec     {benchmarks['cpu_linear']['samples_per_sec']:5.0f} p/s     {t_cpu_total:5.1f} min ({t_cpu_total/60:4.2f}h)       {t_cpu_total/total_est_min_active*100:4.1f}% [4 vCPUs]")
-    print(f"  2. DeBERTa-v3-large FT (4ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
-    print(f"  3. BGE-large-en-v1.5 FT (5ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
+    print(f"  2. DeBERTa-v3-large FT (3ep)  {benchmarks['deberta']['samples_per_sec']:5.1f} s/s     {t_deb_total:5.1f} min ({t_deb_total/60:4.2f}h)       {t_deb_total/total_est_min_active*100:4.1f}% [GPU 0, Dedup TTA]")
+    print(f"  3. BGE-large-en-v1.5 FT (3ep) {benchmarks['bge']['samples_per_sec']:5.1f} s/s     {t_bge_total:5.1f} min ({t_bge_total/60:4.2f}h)       {t_bge_total/total_est_min_active*100:4.1f}% [GPU 1, Dedup TTA]")
     print(f"     -> Sequential Transformer Stage:        {t_transformers:5.1f} min ({t_transformers/60:4.2f}h) [{seq_desc}]")
     print(f"  4. {qwen_desc} LoRA ({N_EPOCHS_QWEN} ep)      {benchmarks['qwen']['samples_per_sec']:5.2f} s/s    {t_qwen_active:5.1f} min ({t_qwen_active/60:4.2f}h)       {t_qwen_active/total_est_min_active*100:4.1f}% [Dual GPU, Dedup TTA]")
     print(f"  5. Upfront Token Cache + Meta     --         {t_overhead:5.1f} min ({t_overhead/60:4.2f}h)       {t_overhead/total_est_min_active*100:4.1f}%")
     print("-" * 74)
-    print(f"  ACTIVE SCHEDULE (4/5/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
+    print(f"  ACTIVE SCHEDULE (3/3/{N_EPOCHS_QWEN} ep + TTA):           {total_est_min_active:5.1f} min ({total_est_hours_active:4.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer)")
     print(f"  REFERENCE (Qwen 3ep / 2ep projections):        {total_est_hours_3ep:4.2f}h (3ep) / {total_est_hours_2ep:4.2f}h (2ep)")
     print("-" * 74)
     print("           PROJECTED SCORES & ACCURACY BENCHMARK MATRIX           ")
@@ -5424,7 +5448,7 @@ def run_dry_run_verifier():
     print("  RAM VERDICT: [GREEN] PASSED (Peak ~10.5 GB | Dry run peak ~5.5 GB | Zero OOM Risk)")
     print("-" * 74)
     if total_est_hours_active <= 8.5:
-        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 4/5/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
+        print(f"  >>> VERDICT: [GREEN] GO (Full 5-fold ensemble with 3/3/{N_EPOCHS_QWEN} ep + TTA fits safely within {total_est_hours_active:.2f}h / 9.0h budget, +{9.0-total_est_hours_active:.2f}h buffer) <<<")
     else:
         print("  >>> VERDICT: [AMBER] CAUTION (Projected runtime approaches budget limit) <<<")
     print("  >>> COMPETITION TARGET (>0.70 Macro Balanced Accuracy) CERTIFIED REACHABLE <<<")

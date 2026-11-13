@@ -3011,6 +3011,7 @@ def _train_transformer_fold_impl(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     trainable_names = {n for n, p in model.named_parameters() if p.requires_grad}
 
+    epoch = 0
     for epoch in range(epochs):
         model.train()
         if has_ext and epoch < epochs - 1:
@@ -3512,7 +3513,7 @@ def _train_qwen_lora_fold_impl(
     n_gpus = torch.cuda.device_count() if cuda_ok else 0
     qwen_desc = "Qwen 3 8B" if ("qwen-3" in str(model_dir).lower() or "qwen3" in str(model_dir).lower()) else "Qwen 2.5 7B"
     if "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
-        print(f"  [Qwen LoRA] Loading resident backbone from Host RAM cache (0 disk I/O, fast PCIe transfer)...", flush=True)
+        print("  [Qwen LoRA] Loading resident backbone from Host RAM cache (0 disk I/O, fast PCIe transfer)...", flush=True)
         backbone = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
         dev_map = GLOBAL_RAM_MODEL_CACHE.get("qwen_device_map")
         if n_gpus >= 2:
@@ -3676,6 +3677,7 @@ def _train_qwen_lora_fold_impl(
     n_total_micros_executed = 0
     steady_samples_executed = 0
 
+    epoch = 0
     for epoch in range(epochs):
         t_qwen_ep_start = time.perf_counter()
         t_step1_done = None
@@ -4851,7 +4853,7 @@ class CPUGradientMetaCombiner:
         return cv_oof_probs_eval, cv_score
 
     def predict_proba(self, test_logits_list: list) -> np.ndarray:
-        if self.valid_indices is not None and len(test_logits_list) >= max(self.valid_indices) + 1:
+        if bool(self.valid_indices) and len(test_logits_list) >= max(self.valid_indices) + 1:
             valid_streams = [test_logits_list[i] for i in self.valid_indices if test_logits_list[i] is not None]
         else:
             valid_streams = [l for l in test_logits_list if l is not None]

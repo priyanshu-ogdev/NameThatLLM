@@ -3011,6 +3011,7 @@ def _train_transformer_fold_impl(
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     trainable_names = {n for n, p in model.named_parameters() if p.requires_grad}
 
+    epoch = 0
     for epoch in range(epochs):
         model.train()
         if has_ext and epoch < epochs - 1:
@@ -3512,7 +3513,7 @@ def _train_qwen_lora_fold_impl(
     n_gpus = torch.cuda.device_count() if cuda_ok else 0
     qwen_desc = "Qwen 3 8B" if ("qwen-3" in str(model_dir).lower() or "qwen3" in str(model_dir).lower()) else "Qwen 2.5 7B"
     if "qwen_backbone" in GLOBAL_RAM_MODEL_CACHE:
-        print(f"  [Qwen LoRA] Loading resident backbone from Host RAM cache (0 disk I/O, fast PCIe transfer)...", flush=True)
+        print("  [Qwen LoRA] Loading resident backbone from Host RAM cache (0 disk I/O, fast PCIe transfer)...", flush=True)
         backbone = GLOBAL_RAM_MODEL_CACHE["qwen_backbone"]
         dev_map = GLOBAL_RAM_MODEL_CACHE.get("qwen_device_map")
         if n_gpus >= 2:
@@ -3676,6 +3677,7 @@ def _train_qwen_lora_fold_impl(
     n_total_micros_executed = 0
     steady_samples_executed = 0
 
+    epoch = 0
     for epoch in range(epochs):
         t_qwen_ep_start = time.perf_counter()
         t_step1_done = None
@@ -4851,7 +4853,7 @@ class CPUGradientMetaCombiner:
         return cv_oof_probs_eval, cv_score
 
     def predict_proba(self, test_logits_list: list) -> np.ndarray:
-        if self.valid_indices is not None and len(test_logits_list) >= max(self.valid_indices) + 1:
+        if bool(self.valid_indices) and len(test_logits_list) >= max(self.valid_indices) + 1:
             valid_streams = [test_logits_list[i] for i in self.valid_indices if test_logits_list[i] is not None]
         else:
             valid_streams = [l for l in test_logits_list if l is not None]
@@ -5452,6 +5454,7 @@ def run_dry_run_verifier():
         if X_ext_mini is not None:
             clf.fit(X_tr_masked, y_tr_str, X_comb=X_tr_comb, y_comb=y_tr_comb, sample_weight_comb=w_tr_comb)
             opt_gamma = clf.optimize_gamma(X_va_masked, y_va_int)
+            assert 0.0 <= opt_gamma <= 1.0, "opt_gamma must be in [0.0, 1.0]"
         else:
             clf.fit(X_tr_masked, y_tr_str)
         val_sparse_m = clf.decision_function(X_va_masked)
@@ -5826,9 +5829,9 @@ def run_dry_run_verifier():
         print(f"  External Corpus:        {N_EXT:,} passages (combined train fold: {N_COMB_FOLD:,} passages)")
     print(f"  Prompt Clusters (DSU):  {len(np.unique(group_ids))} unique clusters (Prompt-Grouped Stratified CV)")
     print(f"  Token Length Coverage:  L=448 Head+Tail (mean={mean_tok:.1f}, max={max_tok} words)")
-    print(f"  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
-    print(f"  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
-    print(f"  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
+    print("  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
+    print("  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
+    print("  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
     print("-" * 74)
     print("                   WALL-CLOCK TIME BUDGET MATRIX                  ")
     print("-" * 74)

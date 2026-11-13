@@ -513,6 +513,7 @@ def run_dry_run_verifier():
         if X_ext_mini is not None:
             clf.fit(X_tr_masked, y_tr_str, X_comb=X_tr_comb, y_comb=y_tr_comb, sample_weight_comb=w_tr_comb)
             opt_gamma = clf.optimize_gamma(X_va_masked, y_va_int)
+            assert 0.0 <= opt_gamma <= 1.0, "opt_gamma must be in [0.0, 1.0]"
         else:
             clf.fit(X_tr_masked, y_tr_str)
         val_sparse_m = clf.decision_function(X_va_masked)
@@ -887,9 +888,9 @@ def run_dry_run_verifier():
         print(f"  External Corpus:        {N_EXT:,} passages (combined train fold: {N_COMB_FOLD:,} passages)")
     print(f"  Prompt Clusters (DSU):  {len(np.unique(group_ids))} unique clusters (Prompt-Grouped Stratified CV)")
     print(f"  Token Length Coverage:  L=448 Head+Tail (mean={mean_tok:.1f}, max={max_tok} words)")
-    print(f"  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
-    print(f"  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
-    print(f"  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
+    print("  RAM Token Caching:      Upfront RAM resident with Stylometric TTA (128/320)")
+    print("  Dual-GPU Execution:     Sequential DeBERTa (GPU 0) -> BGE (GPU 1) -> Qwen LoRA (Dual GPU)")
+    print("  Parquet Output:         submission.parquet (columns: ['id', 'model'])")
     print("-" * 74)
     print("                   WALL-CLOCK TIME BUDGET MATRIX                  ")
     print("-" * 74)

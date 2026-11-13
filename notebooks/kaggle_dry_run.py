@@ -680,11 +680,13 @@ def compute_same_prompt_sibling_repulsion(
     batch_groups: torch.Tensor | None,
     batch_labels: torch.Tensor,
     margin: float = 0.15,
+    sample_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Penalizes representations of responses to the SAME prompt that collapse together
     despite originating from DIFFERENT model generators (author style separation).
     Runs 100% vectorized in PyTorch without CPU-GPU synchronization stalls.
+    Optionally weights pairs by sample_weights (e.g. domain discounting for external data).
     """
     B = representations.size(0)
     if B <= 1 or batch_groups is None:
@@ -694,11 +696,16 @@ def compute_same_prompt_sibling_repulsion(
     diff_model = (batch_labels.unsqueeze(1) != batch_labels.unsqueeze(0))
     pair_mask = torch.triu(same_prompt & diff_model, diagonal=1)
 
-    n_pairs = pair_mask.sum()
     f_norm = F.normalize(representations.float(), p=2, dim=-1)
     cos_sim = torch.mm(f_norm, f_norm.t())
-    viol = torch.clamp(cos_sim - margin, min=0.0)
-    repulsion = (viol.pow(2) * pair_mask.float()).sum() / n_pairs.clamp(min=1.0)
+    viol = torch.clamp(cos_sim - margin, min=0.0).pow(2)
+    if sample_weights is not None:
+        sw = sample_weights.to(device=representations.device, dtype=torch.float32)
+        pair_weights = (sw.unsqueeze(1) * sw.unsqueeze(0)) * pair_mask.float()
+        repulsion = (viol * pair_weights).sum() / pair_weights.sum().clamp(min=1e-6)
+    else:
+        n_pairs = pair_mask.sum()
+        repulsion = (viol * pair_mask.float()).sum() / n_pairs.clamp(min=1.0)
     return repulsion
 
 
@@ -1980,9 +1987,9 @@ class SpikeAndGapHierarchicalHead(nn.Module):
         cos_sim = F.linear(emb, w_norm)
         cos_sim = cos_sim.view(-1, self.num_classes, self.sub_centers)
 
-        # Max-cosine over sub-centers per class with bounded scale
-        logits, _ = cos_sim.max(dim=-1)
-        return logits * torch.clamp(self.scale, 5.0, 30.0)
+        # Smooth-max over K=3 sub-centers (tau=0.15) keeps all sub-centers alive & differentiable
+        logits = 0.15 * torch.logsumexp(cos_sim / 0.15, dim=-1)
+        return logits * torch.clamp(self.scale, 8.0, 24.0)
 
 
 class StylometricMultiMomentPooler(nn.Module):
@@ -2097,12 +2104,12 @@ class FocalLoss(nn.Module):
         else:
             self.sibling_margins = None
 
-    def forward(self, logits, targets, sample_weights=None):
+    def forward(self, logits, targets, sample_weights=None, margin_scale: float = 0.5):
         num_classes = logits.size(-1)
         targets = targets.to(device=logits.device, dtype=torch.long).clamp(0, num_classes - 1)
         logits_f = logits.float()
         if self.use_sibling_margins and self.sibling_margins is not None and self.sibling_margins.size(0) == num_classes:
-            sm = 0.5 * self.sibling_margins.to(logits.device)  # damped 0.5x to prevent early gradient distortion
+            sm = margin_scale * self.sibling_margins.to(logits.device)
             target_margins = sm[targets].unsqueeze(1)
             logits_f = logits_f.scatter_add(1, targets.unsqueeze(1), -target_margins)
         log_prob = torch.nn.functional.log_softmax(logits_f, dim=-1)
@@ -2328,26 +2335,27 @@ def evaluate_transformer_split(model, enc_data, tokenizer, dev, use_amp, num_cla
             all_logits = []
             try:
                 with inference_context():
-                    for start in range(0, n_samples, eval_bs):
-                        end = min(start + eval_bs, n_samples)
-                        batch_indices = sort_idx[start:end]
-                        sl = {
-                            "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                            "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                        }
-                        if "token_type_ids" in enc:
-                            sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
-                        padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                        kw = {
-                            "input_ids": padded["input_ids"].to(dev),
-                            "attention_mask": padded["attention_mask"].to(dev),
-                        }
-                        if "token_type_ids" in padded:
-                            kw["token_type_ids"] = padded["token_type_ids"].to(dev)
-                        with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
-                            set_model_pooler_mask(model, kw["attention_mask"])
-                            logits = model(**kw).logits
-                        all_logits.append(logits.float().cpu().numpy())
+                    with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler):
+                        for start in range(0, n_samples, eval_bs):
+                            end = min(start + eval_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            if "token_type_ids" in enc:
+                                sl["token_type_ids"] = [enc["token_type_ids"][j] for j in batch_indices]
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            kw = {
+                                "input_ids": padded["input_ids"].to(dev),
+                                "attention_mask": padded["attention_mask"].to(dev),
+                            }
+                            if "token_type_ids" in padded:
+                                kw["token_type_ids"] = padded["token_type_ids"].to(dev)
+                            with torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16):
+                                set_model_pooler_mask(model, kw["attention_mask"])
+                                logits = model(**kw).logits
+                            all_logits.append(logits.float().cpu().numpy())
                 break
             except torch.cuda.OutOfMemoryError:
                 set_model_pooler_mask(model, None)
@@ -2459,36 +2467,41 @@ def evaluate_qwen_split(backbone, head, enc_data, tokenizer, first_dev, head_dev
             all_logits = []
             try:
                 with inference_context():
-                    for start in range(0, n_samples, inf_bs):
-                        end = min(start + inf_bs, n_samples)
-                        batch_indices = sort_idx[start:end]
-                        sl = {
-                            "input_ids": [enc["input_ids"][j] for j in batch_indices],
-                            "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
-                        }
-                        padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
-                        batch_kwargs = {
-                            "input_ids": padded["input_ids"].to(first_dev),
-                            "attention_mask": padded["attention_mask"].to(first_dev),
-                        }
-                        with autocast_ctx:
-                            out = backbone(**batch_kwargs, output_hidden_states=False)
-                            h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                            del out
-                            if isinstance(head, SpikeAndGapHierarchicalHead):
-                                logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
-                            else:
-                                last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                                if getattr(tokenizer, "padding_side", "left") == "left":
-                                    pooled = last_h[:, -1, :].float()
+                    with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                        for start in range(0, n_samples, inf_bs):
+                            end = min(start + inf_bs, n_samples)
+                            batch_indices = sort_idx[start:end]
+                            sl = {
+                                "input_ids": [enc["input_ids"][j] for j in batch_indices],
+                                "attention_mask": [enc["attention_mask"][j] for j in batch_indices],
+                            }
+                            padded = tokenizer.pad(sl, padding=True, return_tensors="pt")
+                            batch_kwargs = {
+                                "input_ids": padded["input_ids"].to(first_dev),
+                                "attention_mask": padded["attention_mask"].to(first_dev),
+                            }
+                            with autocast_ctx:
+                                out = backbone(**batch_kwargs, output_hidden_states=False)
+                                if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
+                                    h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
                                 else:
-                                    attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                    seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                    batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                    pooled = last_h[batch_idx, seq_lens].float()
-                                logits = head(pooled.to(head_dev)).float().cpu().numpy()
-                            del h_input
-                        all_logits.append(logits)
+                                    h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                                captured_hs.clear()
+                                del out
+                                if isinstance(head, SpikeAndGapHierarchicalHead):
+                                    logits = head(h_input, batch_kwargs["attention_mask"]).float().cpu().numpy()
+                                else:
+                                    last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                                    if getattr(tokenizer, "padding_side", "left") == "left":
+                                        pooled = last_h[:, -1, :].float()
+                                    else:
+                                        attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                        seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                        batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                        pooled = last_h[batch_idx, seq_lens].float()
+                                    logits = head(pooled.to(head_dev)).float().cpu().numpy()
+                                del h_input
+                            all_logits.append(logits)
                 break
             except torch.cuda.OutOfMemoryError:
                 out = h_input = logits = batch_kwargs = padded = None
@@ -2872,7 +2885,8 @@ def _train_transformer_fold_impl(
         )
         pooler_inst = get_model_pooler(model)
         try:
-            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+            with capture_intermediate_layers(model, (-1, -3, -6), target_pooler=pooler_inst):
+                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
                     if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
                         print(f"  [{model_name}] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
                         stop_early = True
@@ -2898,13 +2912,18 @@ def _train_transformer_fold_impl(
                             else:
                                 logits = model(**batch_kwargs).logits
                             logits_f = logits.float()
-                        main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights)
+                        main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights, margin_scale=0.5 * (epoch + 1) / epochs)
                         fam_logits = compute_family_logits(logits_f, temp=4.0)
                         batch_fam_labels = label_to_fam_tensor[batch_labels]
-                        aux_loss = family_criterion(fam_logits, batch_fam_labels)
+                        raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
+                        if batch_weights is not None:
+                            bw = batch_weights.to(device=raw_aux.device, dtype=raw_aux.dtype)
+                            aux_loss = (raw_aux * bw).sum() / bw.sum().clamp(min=1e-6)
+                        else:
+                            aux_loss = raw_aux.mean()
                         loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
                         if batch_groups is not None:
-                            repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
+                            repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15, sample_weights=batch_weights)
                             loss = loss + (0.04 * repulsion_loss) / grad_accum
                         branch_var = getattr(getattr(model, "classifier", None), "last_branch_var", None)
                         if branch_var is not None:
@@ -3512,64 +3531,75 @@ def _train_qwen_lora_fold_impl(
             sample_weights=curr_weights,
         )
         try:
-            for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
-                if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
-                    print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
-                    stop_early = True
-                    break
+            with capture_intermediate_layers(backbone, (-1, -5, -9)) as captured_hs:
+                for micro_step, (batch_kwargs, batch_labels) in enumerate(prefetcher):
+                    if deadline is not None and (micro_step % 10 == 0) and time.perf_counter() > deadline:
+                        print(f"  [Qwen LoRA] [Time Guard] Deadline reached mid-epoch at step {micro_step}/{n_total_micros}. Stopping training.", flush=True)
+                        stop_early = True
+                        break
 
-                try:
-                    batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
-                    batch_weights = batch_kwargs.pop("_batch_weights", None)
-                    autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
-                    with autocast_ctx:
-                        out = backbone(**batch_kwargs, output_hidden_states=False)
-                        h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
-                        del out
-                        if isinstance(head, SpikeAndGapHierarchicalHead):
-                            logits = head(h_input, batch_kwargs["attention_mask"])
-                        else:
-                            last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
-                            if getattr(tokenizer, "padding_side", "left") == "left":
-                                pooled = last_h[:, -1, :].float()
+                    try:
+                        batch_groups = batch_kwargs.pop("_batch_groups", getattr(prefetcher, "current_groups", None))
+                        batch_weights = batch_kwargs.pop("_batch_weights", None)
+                        autocast_ctx = amp_autocast() if cuda_ok else contextlib.nullcontext()
+                        with autocast_ctx:
+                            out = backbone(**batch_kwargs, output_hidden_states=False)
+                            if -1 in captured_hs and -5 in captured_hs and -9 in captured_hs:
+                                h_input = (captured_hs[-1], captured_hs[-5], captured_hs[-9])
                             else:
-                                attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
-                                seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
-                                batch_idx = torch.arange(last_h.size(0), device=last_h.device)
-                                pooled = last_h[batch_idx, seq_lens].float()
-                            logits = head(pooled.to(head_dev))
-                        del h_input
-                    logits_f = logits.float()
-                    main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights)
-                    fam_logits = compute_family_logits(logits_f, temp=4.0)
-                    batch_fam_labels = label_to_fam_tensor[batch_labels]
-                    aux_loss = family_criterion(fam_logits, batch_fam_labels)
-                    loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
-                    if batch_groups is not None:
-                        repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15)
-                        loss = loss + (0.04 * repulsion_loss) / grad_accum
+                                h_input = getattr(out, "last_hidden_state", out[0] if isinstance(out, tuple) else out)
+                            captured_hs.clear()
+                            del out
+                            if isinstance(head, SpikeAndGapHierarchicalHead):
+                                logits = head(h_input, batch_kwargs["attention_mask"])
+                            else:
+                                last_h = h_input[0] if isinstance(h_input, (tuple, list)) else h_input
+                                if getattr(tokenizer, "padding_side", "left") == "left":
+                                    pooled = last_h[:, -1, :].float()
+                                else:
+                                    attn_mask = batch_kwargs["attention_mask"].to(last_h.device)
+                                    seq_lens = torch.clamp(attn_mask.sum(dim=1) - 1, min=0)
+                                    batch_idx = torch.arange(last_h.size(0), device=last_h.device)
+                                    pooled = last_h[batch_idx, seq_lens].float()
+                                logits = head(pooled.to(head_dev))
+                            del h_input
+                        logits_f = logits.float()
+                        main_loss = criterion(logits_f, batch_labels, sample_weights=batch_weights, margin_scale=1.5 * (epoch + 1) / epochs)
+                        fam_logits = compute_family_logits(logits_f, temp=4.0)
+                        batch_fam_labels = label_to_fam_tensor[batch_labels]
+                        raw_aux = F.cross_entropy(fam_logits, batch_fam_labels, reduction="none")
+                        if batch_weights is not None:
+                            bw = batch_weights.to(device=raw_aux.device, dtype=raw_aux.dtype)
+                            aux_loss = (raw_aux * bw).sum() / bw.sum().clamp(min=1e-6)
+                        else:
+                            aux_loss = raw_aux.mean()
+                        loss = (main_loss + FAMILY_AUX_WEIGHT * aux_loss) / grad_accum
+                        if batch_groups is not None:
+                            repulsion_loss = compute_same_prompt_sibling_repulsion(logits_f, batch_groups, batch_labels, margin=0.15, sample_weights=batch_weights)
+                            loss = loss + (0.04 * repulsion_loss) / grad_accum
 
-                    if cuda_ok:
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
+                        if cuda_ok:
+                            scaler.scale(loss).backward()
+                        else:
+                            loss.backward()
 
-                    loss_val = loss.item() * grad_accum
-                    if math.isnan(loss_val) or math.isinf(loss_val):
-                        n_skipped_micros += 1
-                        print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
-                        if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
-                            raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
-                        optimizer.zero_grad(set_to_none=True)
-                        accumulated_steps = 0
-                        continue
+                        loss_val = loss.item() * grad_accum
+                        if math.isnan(loss_val) or math.isinf(loss_val):
+                            n_skipped_micros += 1
+                            print(f"  [Qwen LoRA] Warning: NaN/Inf loss at micro-step {micro_step}. Skipping ({n_skipped_micros} total skips).", flush=True)
+                            if n_skipped_micros > 0.15 * max(n_total_micros * (epoch + 1), 1):
+                                raise FloatingPointError(f"[Qwen LoRA] >15% micro-batches ({n_skipped_micros}) produced NaN/Inf loss. Discarding fold.")
+                            optimizer.zero_grad(set_to_none=True)
+                            accumulated_steps = 0
+                            continue
 
-                except torch.cuda.OutOfMemoryError:
-                    n_oom_skips += 1
-                    print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
-                    if n_oom_skips > 5:
-                        raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
-                    out = h_input = logits = loss = batch_kwargs = batch_labels = None
+                    except torch.cuda.OutOfMemoryError:
+                        n_oom_skips += 1
+                        print(f"  [Qwen LoRA] CUDA OOM at micro-step {micro_step} (OOM #{n_oom_skips}). Resetting partial grads...", flush=True)
+                        if n_oom_skips > 5:
+                            raise RuntimeError("[Qwen LoRA] Exceeded 5 CUDA OOM errors in fold; aborting to prevent data starvation.")
+                        captured_hs.clear()
+                        out = h_input = logits = loss = batch_kwargs = batch_labels = None
                     optimizer.zero_grad(set_to_none=True)
                     accumulated_steps = 0
                     if cuda_ok:
@@ -4199,20 +4229,21 @@ def optimize_blend_weights(oof_svm, oof_deb, oof_qwen, oof_bge, y_true, temperat
 
 def optimize_cpu_subblend(sparse_probs: np.ndarray, dense_probs: np.ndarray, y_true_int: np.ndarray) -> float:
     """
-    Find optimal alpha such that alpha*sparse + (1-alpha)*dense maximizes OOF balanced accuracy.
-    Searches over alpha in [0.70, 0.98] anchored at 0.85 to ensure 2%–30% dense stylometric signal
-    without degrading sparse dominance.
+    Tunes log-probability (Product-of-Experts) fusion weight alpha in [0.70, 1.00].
+    Includes 1.00 so dense stylometrics only enter when they strictly improve or match OOF accuracy.
     """
     valid = np.isfinite(sparse_probs).all(axis=1) & np.isfinite(dense_probs).all(axis=1)
     if np.sum(valid) < 10:
-        return 0.85
-    base_score = balanced_accuracy_score(y_true_int[valid], sparse_probs[valid].argmax(axis=1))
+        return 1.0
+    log_s = np.log(np.maximum(sparse_probs[valid], 1e-12))
+    log_d = np.log(np.maximum(dense_probs[valid], 1e-12))
+    base_score = balanced_accuracy_score(y_true_int[valid], log_s.argmax(axis=1))
     best_score = base_score
-    best_alpha = 0.85
+    best_alpha = 1.0
     for alpha in np.linspace(0.98, 0.70, 15):
-        blend = alpha * sparse_probs[valid] + (1.0 - alpha) * dense_probs[valid]
-        score = balanced_accuracy_score(y_true_int[valid], blend.argmax(axis=1))
-        if score > best_score:
+        blend_log = alpha * log_s + (1.0 - alpha) * log_d
+        score = balanced_accuracy_score(y_true_int[valid], blend_log.argmax(axis=1))
+        if score >= best_score:
             best_score = score
             best_alpha = float(alpha)
     return round(best_alpha, 2)
@@ -4815,7 +4846,7 @@ def run_dry_run_verifier():
     is_qwen3 = bool(qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()))
     N_EPOCHS_DEB = 4
     N_EPOCHS_BGE = 4
-    N_EPOCHS_QWEN = 2 if is_qwen3 else 3
+    N_EPOCHS_QWEN = 3
 
     # ── CHECK 3: DeBERTa-v3-large Mini-Training & Throughput Benchmark ──
     print("[Check 3/9] Testing DeBERTa-v3-large Mini-Training on GPU 0 (cuda:0)...", flush=True)

@@ -157,7 +157,7 @@ def run_dry_run_verifier():
     is_qwen3 = bool(qwen_dir and ("qwen-3" in str(qwen_dir).lower() or "qwen3" in str(qwen_dir).lower()))
     N_EPOCHS_DEB = 4
     N_EPOCHS_BGE = 4
-    N_EPOCHS_QWEN = 2 if is_qwen3 else 3
+    N_EPOCHS_QWEN = 3
 
     # ── CHECK 3: DeBERTa-v3-large Mini-Training & Throughput Benchmark ──
     print("[Check 3/9] Testing DeBERTa-v3-large Mini-Training on GPU 0 (cuda:0)...", flush=True)
